@@ -2,7 +2,7 @@ use eyre::Result;
 use jitevm::code::{EvmCode, EvmOpParserMode, IndexedEvmCode};
 use jitevm::constants::EVM_STACK_SIZE;
 use jitevm::interpreter::{EvmContext, EvmInnerContext, EvmOuterContext};
-use jitevm::jit::{JitEvmEngine, JitEvmExecutionContext};
+use jitevm::jit::{JitContractBuilder, JitEvmExecutionContext};
 use jitevm::test_data;
 use primitive_types::U256;
 use std::collections::HashMap;
@@ -98,34 +98,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     use inkwell::context::Context;
     let context = Context::create();
-    let engine = JitEvmEngine::new_from_context(&context)?;
-    // let fn_contract = engine.jit_compile_contract(&EvmCode { ops: ops.clone() }.augment().index())?;
-    let fn_contract = engine.jit_compile_contract(&EvmCode { ops: ops.clone() }.augment().index(), Some("jit_main.ll".to_string()), Some("jit_main.asm".to_string()))?;
+    let contract = JitContractBuilder::with_context("some-contract-address", &context)?
+        .build(EvmCode { ops: ops.clone() }.augment().index())?;
 
     println!("Benchmark compiled execution ...");
     for _i in 0..10 {
-        let mut execution_context_stack = [U256::zero(); 1024];
-        // TODO: at maximum block size of 30M gas, max memory size is 123169 words = ~128000 words = 4096000 bytes
-        let mut execution_context_memory = [0u8; 4096000];
-        let mut execution_context_storage = HashMap::<U256, U256>::new();
-
-        let mut execution_context = JitEvmExecutionContext {
-            stack: &mut execution_context_stack as *mut _ as usize,
-            memory: &mut execution_context_memory as *mut _ as usize,
-            storage: &mut execution_context_storage as *mut _ as usize,
-        };
-        println!("INPUT: {:?}", execution_context.clone());
-
+        let mut holder = JitEvmExecutionContext::new();
         let measurement_now = Instant::now();
-        let ret = unsafe { fn_contract.call(&mut execution_context as *mut _ as usize) };
+        contract.call(&mut holder)?;
         let measurement_runtime = measurement_now.elapsed();
-
-        println!("Ret: {:?}", ret);
-        println!("Stack: {:?}", execution_context_stack);
-        println!("Storage: {:?}", execution_context_storage);
-        println!("Runtime: {:.2?}", measurement_runtime);
+        println!("measurement_runtime {:?}", measurement_runtime);
     }
-
 
     // TESTING AOT-COMPILED EVM
 
@@ -154,14 +137,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         ($ctx:expr, $_aot_ret:ident, $pc:expr, $op:expr) => {
             $ctx.inner.pc = $pc;
             match $ctx.tick_inner_simplified($op) {
-                Ok(true) => {},
-                Ok(false) => { $_aot_ret = 0; break; },
-                Err(_) => { $_aot_ret = 1; break; },
+                Ok(true) => {}
+                Ok(false) => {
+                    $_aot_ret = 0;
+                    break;
+                }
+                Err(_) => {
+                    $_aot_ret = 1;
+                    break;
+                }
             }
         };
     }
 
-    for i in 0..3 {
+    for _ in 0..3 {
         let mut ctx = ctx_raw.clone();
 
         enum AotJumpDest {
@@ -182,7 +171,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     exec_aot_evmop!(ctx, _aot_ret, 5, Push(1, U256::one()));
                     _jumpdest = AotJumpDest::JumpDest1;
                     continue;
-                },
+                }
                 AotJumpDest::JumpDest1 => {
                     // exec_aot_evmop!(ctx, _aot_ret, 7, Jumpdest);   // op 3 code 7
                     exec_aot_evmop!(ctx, _aot_ret, 8, Dup3);
@@ -224,14 +213,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         _aot_ret = 2;
                         break;
                     }
-                },
+                }
                 AotJumpDest::JumpDest2 => {
                     // exec_aot_evmop!(ctx, _aot_ret, 28, Jumpdest);   // op 21 code 28
                     exec_aot_evmop!(ctx, _aot_ret, 29, Swap2);
                     exec_aot_evmop!(ctx, _aot_ret, 30, Pop);
                     exec_aot_evmop!(ctx, _aot_ret, 31, Pop);
                     exec_aot_evmop!(ctx, _aot_ret, 32, Stop);
-                },
+                }
             }
         }
 
@@ -239,9 +228,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("{} -> Context: {:?}", _aot_ret, ctx);
         println!("Runtime: {:.2?}", measurement_runtime);
     }
-
-
-
 
     // fn jit_compile_sum(&self) -> Option<JitFunction<SumFunc>> {
     //     let i64_type = self.context.i64_type();

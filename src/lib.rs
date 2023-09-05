@@ -1,6 +1,6 @@
-pub mod constants;
 pub mod code;
-pub mod operations;
+pub mod constants;
 pub mod interpreter;
 pub mod jit;
+pub mod operations;
 pub mod test_data;
