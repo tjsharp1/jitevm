@@ -37,12 +37,12 @@ macro_rules! op2_double_add_exp {
             .build_int_compare(IntPredicate::EQ, and, zero, "");
         $mask = $self.builder.build_right_shift($mask, one, false, "");
 
-        $accum = $self.builder.build_left_shift($accum, one, "");
-        let add = $self
+        $accum = $self.builder.build_int_mul($accum, $accum, "");
+        let mul = $self
             .builder
-            .build_select(is_zero_bit, zero, $base, "")
+            .build_select(is_zero_bit, one, $base, "")
             .into_int_value();
-        $accum = $self.builder.build_int_add($accum, add, "");
+        $accum = $self.builder.build_int_add($accum, mul, "");
     }};
     ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, 4) => {{
         op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 1);
@@ -71,7 +71,7 @@ macro_rules! op2_double_add_exp {
         let zero = $self.type_stackel.const_int(0, false);
         let is_zero = $self
             .builder
-            .build_int_compare(IntPredicate::EQ, exp, zero, "");
+            .build_int_compare(IntPredicate::EQ, exp, zero, "exp_check");
 
         let else_label = format!("Instruction #{}: Exp / else", $i);
         let then_label = format!("Instruction #{}: Exp / then", $i);
@@ -100,7 +100,7 @@ macro_rules! op2_double_add_exp {
             sp: then_block.phi_sp.as_basic_value().into_int_value(),
             mem: then_block.phi_mem.as_basic_value().into_int_value(),
         };
-        $self.build_stack_push(then_book, const_1);
+        let then_book = $self.build_stack_push(then_book, const_1);
         $next.add_incoming(&then_book, &then_block);
 
         $self.builder.build_unconditional_branch($next.block);
@@ -117,15 +117,20 @@ macro_rules! op2_double_add_exp {
             sp: else_block.phi_sp.as_basic_value().into_int_value(),
             mem: else_block.phi_mem.as_basic_value().into_int_value(),
         };
-        let mut mask = $self.builder.build_left_shift(const_1, const_255, "");
+        let mut mask = $self
+            .builder
+            .build_left_shift(const_1, const_255, "mask_value");
 
-        let mut accum = a;
+        let mut accum = $self
+            .builder
+            .build_bitcast(zero, $self.type_stackel, "accum_copy")
+            .into_int_value();
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
 
-        $self.build_stack_push(else_book, accum);
+        let else_book = $self.build_stack_push(else_book, accum);
         $self.builder.build_unconditional_branch($next.block);
         $next.add_incoming(&else_book, &else_block);
     }};
@@ -337,7 +342,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
         let module = context.create_module(name);
         let builder = context.create_builder();
-        let execution_engine = module.create_jit_execution_engine(OptimizationLevel::Aggressive)?;
+        let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None)?; //OptimizationLevel::Aggressive)?;
 
         let target_data = execution_engine.get_target_data();
         let type_ptrint = context.ptr_sized_int_type(&target_data, None); // type for pointers (stack pointer, host interaction)
@@ -1328,7 +1333,8 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     &triple,
                     &cpu,
                     &features,
-                    OptimizationLevel::Aggressive,
+                    //OptimizationLevel::Aggressive,
+                    OptimizationLevel::None,
                     RelocMode::Default,
                     CodeModel::Default,
                 )

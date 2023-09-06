@@ -291,33 +291,32 @@ impl EvmContext<'_> {
             }
             _ => {
                 return Err(EvmInterpreterError::UnknownInstruction(op.clone()));
-            }
-            // 0x52 => {
-            //     // MSTORE
-            //     let offset = self.inner.pop().as_usize();
-            //     let value = self.inner.pop();
+            } // 0x52 => {
+              //     // MSTORE
+              //     let offset = self.inner.pop().as_usize();
+              //     let value = self.inner.pop();
 
-            //     if self.inner.memory.len() < offset + 32 {
-            //         self.inner.memory.resize(offset + 32, 0);
-            //     }
-            //     value.to_big_endian(&mut self.inner.memory[offset .. offset+32]);
+              //     if self.inner.memory.len() < offset + 32 {
+              //         self.inner.memory.resize(offset + 32, 0);
+              //     }
+              //     value.to_big_endian(&mut self.inner.memory[offset .. offset+32]);
 
-            //     // account for gas:
-            //     // ...
-            // },
-            // 0x60 => {
-            //     // PUSH1
-            //     let val = U256::from_big_endian(&self.inner.code[self.inner.pc .. self.inner.pc+1]);
-            //     self.inner.pc += 1;
+              //     // account for gas:
+              //     // ...
+              // },
+              // 0x60 => {
+              //     // PUSH1
+              //     let val = U256::from_big_endian(&self.inner.code[self.inner.pc .. self.inner.pc+1]);
+              //     self.inner.pc += 1;
 
-            //     self.inner.push(val);
+              //     self.inner.push(val);
 
-            //     // account for gas:
-            //     // ...
-            // },
-            // _ => {
-            //     panic!("Unsupported opcode: {:#04x}", opcode);
-            // }
+              //     // account for gas:
+              //     // ...
+              // },
+              // _ => {
+              //     panic!("Unsupported opcode: {:#04x}", opcode);
+              // }
         }
 
         Ok(true)
