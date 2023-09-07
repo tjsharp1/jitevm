@@ -1,7 +1,7 @@
 use crate::code::{EvmOp, IndexedEvmCode};
 use crate::constants::*;
 use inkwell::basic_block::BasicBlock;
-use inkwell::builder::Builder;
+use inkwell::builder::{Builder, BuilderError as InkwellBuilderError};
 use inkwell::context::Context;
 use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
@@ -31,18 +31,18 @@ macro_rules! op2_double_add_exp {
         let zero = $self.type_stackel.const_int(0, false);
         let one = $self.type_stackel.const_int(1, false);
 
-        let and = $self.builder.build_and($exp, $mask, "");
+        let and = $self.builder.build_and($exp, $mask, "")?;
         let is_zero_bit = $self
             .builder
-            .build_int_compare(IntPredicate::EQ, and, zero, "");
-        $mask = $self.builder.build_right_shift($mask, one, false, "");
+            .build_int_compare(IntPredicate::EQ, and, zero, "")?;
+        $mask = $self.builder.build_right_shift($mask, one, false, "")?;
 
-        $accum = $self.builder.build_int_mul($accum, $accum, "");
+        $accum = $self.builder.build_int_mul($accum, $accum, "")?;
         let mul = $self
             .builder
-            .build_select(is_zero_bit, one, $base, "")
+            .build_select(is_zero_bit, one, $base, "")?
             .into_int_value();
-        $accum = $self.builder.build_int_add($accum, mul, "");
+        $accum = $self.builder.build_int_add($accum, mul, "")?;
     }};
     ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, 4) => {{
         op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 1);
@@ -63,26 +63,26 @@ macro_rules! op2_double_add_exp {
         op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 16);
     }};
     ($self:ident, $book:ident, $this:ident, $next:ident, $i:ident) => {{
-        let (book, a) = $self.build_stack_pop($book);
-        let (book, exp) = $self.build_stack_pop(book);
+        let (book, a) = $self.build_stack_pop($book)?;
+        let (book, exp) = $self.build_stack_pop(book)?;
 
         let const_255 = $self.type_stackel.const_int(255, false);
         let const_1 = $self.type_stackel.const_int(1, false);
         let zero = $self.type_stackel.const_int(0, false);
         let is_zero = $self
             .builder
-            .build_int_compare(IntPredicate::EQ, exp, zero, "exp_check");
+            .build_int_compare(IntPredicate::EQ, exp, zero, "exp_check")?;
 
         let else_label = format!("Instruction #{}: Exp / else", $i);
         let then_label = format!("Instruction #{}: Exp / then", $i);
         let index = format!("_{}", $i);
-        let else_block = JitEvmEngineSimpleBlock::new(&$self, $this.block, &else_label, &index);
-        let then_block = JitEvmEngineSimpleBlock::new(&$self, $this.block, &then_label, &index);
+        let else_block = JitEvmEngineSimpleBlock::new(&$self, $this.block, &else_label, &index)?;
+        let then_block = JitEvmEngineSimpleBlock::new(&$self, $this.block, &then_label, &index)?;
 
         $self.builder.position_at_end($this.block);
         $self
             .builder
-            .build_conditional_branch(is_zero, then_block.block, else_block.block);
+            .build_conditional_branch(is_zero, then_block.block, else_block.block)?;
 
         else_block.add_incoming(&book, &$this);
         then_block.add_incoming(&book, &$this);
@@ -100,10 +100,10 @@ macro_rules! op2_double_add_exp {
             sp: then_block.phi_sp.as_basic_value().into_int_value(),
             mem: then_block.phi_mem.as_basic_value().into_int_value(),
         };
-        let then_book = $self.build_stack_push(then_book, const_1);
+        let then_book = $self.build_stack_push(then_book, const_1)?;
         $next.add_incoming(&then_book, &then_block);
 
-        $self.builder.build_unconditional_branch($next.block);
+        $self.builder.build_unconditional_branch($next.block)?;
 
         //// ELSE BLOCK
         $self.builder.position_at_end(else_block.block);
@@ -119,76 +119,76 @@ macro_rules! op2_double_add_exp {
         };
         let mut mask = $self
             .builder
-            .build_left_shift(const_1, const_255, "mask_value");
+            .build_left_shift(const_1, const_255, "mask_value")?;
 
         let mut accum = $self
             .builder
-            .build_bitcast(zero, $self.type_stackel, "accum_copy")
+            .build_bitcast(zero, $self.type_stackel, "accum_copy")?
             .into_int_value();
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
         op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
 
-        let else_book = $self.build_stack_push(else_book, accum);
-        $self.builder.build_unconditional_branch($next.block);
+        let else_book = $self.build_stack_push(else_book, accum)?;
+        $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&else_book, &else_block);
     }};
 }
 
 macro_rules! op1_llvmnativei256_operation {
     ($self:ident, $book:ident, $fname:ident) => {{
-        let (book, a) = $self.build_stack_pop($book);
-        let d = $self.builder.$fname(a, "");
-        let book = $self.build_stack_push(book, d);
+        let (book, a) = $self.build_stack_pop($book)?;
+        let d = $self.builder.$fname(a, "")?;
+        let book = $self.build_stack_push(book, d)?;
         book
     }};
 }
 
 macro_rules! op2_llvmnativei256_operation {
     ($self:ident, $book:ident, $fname:ident) => {{
-        let (book, a) = $self.build_stack_pop($book);
-        let (book, b) = $self.build_stack_pop(book);
-        let d = $self.builder.$fname(a, b, "");
-        let book = $self.build_stack_push(book, d);
+        let (book, a) = $self.build_stack_pop($book)?;
+        let (book, b) = $self.build_stack_pop(book)?;
+        let d = $self.builder.$fname(a, b, "")?;
+        let book = $self.build_stack_push(book, d)?;
         book
     }};
 }
 
 macro_rules! op2_llvmnativei256_compare_operation {
     ($self:ident, $book:ident, $this:expr, $next:expr, $instructions:expr, $i:expr, $op:expr, $predicate:expr) => {{
-        let (book, a) = $self.build_stack_pop($book);
-        let (book, b) = $self.build_stack_pop(book);
-        let cmp = $self.builder.build_int_compare($predicate, a, b, "");
+        let (book, a) = $self.build_stack_pop($book)?;
+        let (book, b) = $self.build_stack_pop(book)?;
+        let cmp = $self.builder.build_int_compare($predicate, a, b, "")?;
 
         let push_0 = JitEvmEngineSimpleBlock::new(
             &$self,
             $this.block,
             &format!("Instruction #{}: {:?} / push 0", $i, $op),
             &format!("_{}_0", $i),
-        );
+        )?;
         let push_1 = JitEvmEngineSimpleBlock::new(
             &$self,
             push_0.block,
             &format!("Instruction #{}: {:?} / push 1", $i, $op),
             &format!("_{}_1", $i),
-        );
+        )?;
 
         $self.builder.position_at_end($this.block);
         $self
             .builder
-            .build_conditional_branch(cmp, push_1.block, push_0.block);
+            .build_conditional_branch(cmp, push_1.block, push_0.block)?;
         push_0.add_incoming(&book, &$this);
         push_1.add_incoming(&book, &$this);
 
         $self.builder.position_at_end(push_0.block);
-        let book_0 = $self.build_stack_push(book, $self.type_stackel.const_int(0, false));
-        $self.builder.build_unconditional_branch($next.block);
+        let book_0 = $self.build_stack_push(book, $self.type_stackel.const_int(0, false))?;
+        $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&book_0, &push_0);
 
         $self.builder.position_at_end(push_1.block);
-        let book_1 = $self.build_stack_push(book, $self.type_stackel.const_int(1, false));
-        $self.builder.build_unconditional_branch($next.block);
+        let book_1 = $self.build_stack_push(book, $self.type_stackel.const_int(1, false))?;
+        $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&book_1, &push_1);
 
         continue; // skip auto-generated jump to next instruction
@@ -201,6 +201,10 @@ pub enum JitEvmEngineError {
     FunctionLookupError(#[from] inkwell::execution_engine::FunctionLookupError),
     #[error("LlvmStringError: {0:?}")]
     UnknownLlvmStringError(#[from] inkwell::support::LLVMString),
+    #[error("LlvmBuilderError: {0:?}")]
+    LlvmBuilderError(#[from] InkwellBuilderError),
+    #[error("NoInstructionValue")]
+    NoInstructionValue,
     #[error("StringError: {0:?}")]
     UnknownStringError(String),
 }
@@ -249,33 +253,35 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         block_before: BasicBlock<'ctx>,
         name: &str,
         suffix: &str,
-    ) -> Self {
+    ) -> Result<Self, InkwellBuilderError> {
         let i64_type = engine.context.i64_type();
 
         let block = engine.context.insert_basic_block_after(block_before, name);
         engine.builder.position_at_end(block);
         let phi_execution_context = engine
             .builder
-            .build_phi(i64_type, &format!("execution_context{}", suffix));
+            .build_phi(i64_type, &format!("execution_context{}", suffix))?;
         let phi_sp_min = engine
             .builder
-            .build_phi(i64_type, &format!("sp_min{}", suffix));
+            .build_phi(i64_type, &format!("sp_min{}", suffix))?;
         let phi_sp_max = engine
             .builder
-            .build_phi(i64_type, &format!("sp_max{}", suffix));
-        let phi_sp = engine.builder.build_phi(i64_type, &format!("sp{}", suffix));
+            .build_phi(i64_type, &format!("sp_max{}", suffix))?;
+        let phi_sp = engine
+            .builder
+            .build_phi(i64_type, &format!("sp{}", suffix))?;
         let phi_mem = engine
             .builder
-            .build_phi(i64_type, &format!("mem{}", suffix));
+            .build_phi(i64_type, &format!("mem{}", suffix))?;
 
-        Self {
+        Ok(Self {
             block,
             phi_execution_context,
             phi_sp_min,
             phi_sp_max,
             phi_sp,
             phi_mem,
-        }
+        })
     }
 
     pub fn phi_setup_block(&self, book: &JitEvmEngineBookkeeping<'ctx>, prev: &BasicBlock<'ctx>) {
@@ -404,88 +410,95 @@ impl<'ctx> JitContractBuilder<'ctx> {
         self
     }
 
-    // HELPER FUNCTIONS
+    //// HELPER FUNCTIONS
 
     fn build_stack_push<'a>(
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
         val: IntValue<'a>,
-    ) -> JitEvmEngineBookkeeping<'a> {
+    ) -> Result<JitEvmEngineBookkeeping<'a>, InkwellBuilderError> {
         let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
 
         let sp_ptr = self.builder.build_int_to_ptr(
             book.sp,
-            self.type_stackel.ptr_type(AddressSpace::Generic),
+            self.type_stackel.ptr_type(AddressSpace::default()),
             "",
-        );
-        self.builder.build_store(sp_ptr, val);
-        let sp = self.builder.build_int_add(book.sp, sp_offset, "");
+        )?;
+        self.builder.build_store(sp_ptr, val)?;
+        let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
 
-        book.update_sp(sp)
+        Ok(book.update_sp(sp))
     }
 
     fn build_stack_push_vector<'a>(
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
         val: VectorValue<'a>,
-    ) -> JitEvmEngineBookkeeping<'a> {
+    ) -> Result<JitEvmEngineBookkeeping<'a>, InkwellBuilderError> {
         let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
 
         let sp_ptr = self.builder.build_int_to_ptr(
             book.sp,
-            self.type_rvec.ptr_type(AddressSpace::Generic),
+            self.type_rvec.ptr_type(AddressSpace::default()),
             "",
-        );
-        self.builder.build_store(sp_ptr, val);
-        let sp = self.builder.build_int_add(book.sp, sp_offset, "");
+        )?;
+        self.builder.build_store(sp_ptr, val)?;
+        let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
 
-        book.update_sp(sp)
+        Ok(book.update_sp(sp))
     }
 
     fn build_stack_pop<'a>(
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
-    ) -> (JitEvmEngineBookkeeping<'a>, IntValue<'a>) {
+    ) -> Result<(JitEvmEngineBookkeeping<'a>, IntValue<'a>), InkwellBuilderError> {
         let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
 
-        let sp = self.builder.build_int_sub(book.sp, sp_offset, "");
+        let sp = self.builder.build_int_sub(book.sp, sp_offset, "")?;
         let sp_ptr = self.builder.build_int_to_ptr(
             sp,
-            self.type_stackel.ptr_type(AddressSpace::Generic),
+            self.type_stackel.ptr_type(AddressSpace::default()),
             "",
-        );
-        let val = self.builder.build_load(sp_ptr, "").into_int_value();
+        )?;
+        let val = self.builder.build_load(sp_ptr, "")?.into_int_value();
 
-        (book.update_sp(sp), val)
+        Ok((book.update_sp(sp), val))
     }
 
     fn build_stack_pop_vector<'a>(
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
-    ) -> (
-        JitEvmEngineBookkeeping<'a>,
-        VectorValue<'a>,
-        VectorValue<'a>,
-    ) {
+    ) -> Result<
+        (
+            JitEvmEngineBookkeeping<'a>,
+            VectorValue<'a>,
+            VectorValue<'a>,
+        ),
+        InkwellBuilderError,
+    > {
         let sp0_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
         let sp1_offset = self
             .type_ptrint
             .const_int(EVM_JIT_STACK_ALIGN as u64, false);
 
-        let sp0 = self.builder.build_int_sub(book.sp, sp0_offset, "");
-        let sp1 = self.builder.build_int_sub(book.sp, sp1_offset, "");
+        let sp0 = self.builder.build_int_sub(book.sp, sp0_offset, "")?;
+        let sp1 = self.builder.build_int_sub(book.sp, sp1_offset, "")?;
 
-        let sp0_ptr =
-            self.builder
-                .build_int_to_ptr(sp0, self.type_ivec.ptr_type(AddressSpace::Generic), "");
-        let sp1_ptr =
-            self.builder
-                .build_int_to_ptr(sp1, self.type_ivec.ptr_type(AddressSpace::Generic), "");
+        let sp0_ptr = self.builder.build_int_to_ptr(
+            sp0,
+            self.type_ivec.ptr_type(AddressSpace::default()),
+            "",
+        )?;
+        let sp1_ptr = self.builder.build_int_to_ptr(
+            sp1,
+            self.type_ivec.ptr_type(AddressSpace::default()),
+            "",
+        )?;
 
-        let vec0 = self.builder.build_load(sp0_ptr, "").into_vector_value();
-        let vec1 = self.builder.build_load(sp1_ptr, "").into_vector_value();
+        let vec0 = self.builder.build_load(sp0_ptr, "")?.into_vector_value();
+        let vec1 = self.builder.build_load(sp1_ptr, "")?.into_vector_value();
 
-        (book.update_sp(sp0), vec0, vec1)
+        Ok((book.update_sp(sp0), vec0, vec1))
     }
 
     fn build_stack_write<'a>(
@@ -493,40 +506,40 @@ impl<'ctx> JitContractBuilder<'ctx> {
         book: JitEvmEngineBookkeeping<'a>,
         idx: u64,
         val: IntValue<'a>,
-    ) -> JitEvmEngineBookkeeping<'a> {
+    ) -> Result<JitEvmEngineBookkeeping<'a>, InkwellBuilderError> {
         let idx = self
             .type_ptrint
             .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
 
-        let sp_int = self.builder.build_int_sub(book.sp, idx, "");
+        let sp_int = self.builder.build_int_sub(book.sp, idx, "")?;
         let sp_ptr = self.builder.build_int_to_ptr(
             sp_int,
-            self.type_stackel.ptr_type(AddressSpace::Generic),
+            self.type_stackel.ptr_type(AddressSpace::default()),
             "",
-        );
-        self.builder.build_store(sp_ptr, val);
+        )?;
+        self.builder.build_store(sp_ptr, val)?;
 
-        book
+        Ok(book)
     }
 
     fn build_stack_read<'a>(
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
         idx: u64,
-    ) -> (JitEvmEngineBookkeeping<'a>, IntValue<'a>) {
+    ) -> Result<(JitEvmEngineBookkeeping<'a>, IntValue<'a>), InkwellBuilderError> {
         let idx = self
             .type_ptrint
             .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
 
-        let sp_int = self.builder.build_int_sub(book.sp, idx, "");
+        let sp_int = self.builder.build_int_sub(book.sp, idx, "")?;
         let sp_ptr = self.builder.build_int_to_ptr(
             sp_int,
-            self.type_stackel.ptr_type(AddressSpace::Generic),
+            self.type_stackel.ptr_type(AddressSpace::default()),
             "",
-        );
-        let val = self.builder.build_load(sp_ptr, "").into_int_value();
+        )?;
+        let val = self.builder.build_load(sp_ptr, "")?.into_int_value();
 
-        (book, val)
+        Ok((book, val))
     }
 
     fn build_dup<'a>(
@@ -538,17 +551,17 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let sp_src_offset = self
             .type_ptrint
             .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
-        let src_int = self.builder.build_int_sub(book.sp, sp_src_offset, "");
+        let src_int = self.builder.build_int_sub(book.sp, sp_src_offset, "")?;
         let src_ptr = self.builder.build_int_to_ptr(
             src_int,
-            self.type_stackel.ptr_type(AddressSpace::Generic),
+            self.type_stackel.ptr_type(AddressSpace::default()),
             "",
-        );
+        )?;
         let dst_ptr = self.builder.build_int_to_ptr(
             book.sp,
-            self.type_stackel.ptr_type(AddressSpace::Generic),
+            self.type_stackel.ptr_type(AddressSpace::default()),
             "",
-        );
+        )?;
         self.builder.build_memcpy(
             dst_ptr,
             EVM_JIT_STACK_ALIGN,
@@ -556,7 +569,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             EVM_JIT_STACK_ALIGN,
             len_stackel,
         )?;
-        let sp = self.builder.build_int_add(book.sp, len_stackel, "");
+        let sp = self.builder.build_int_add(book.sp, len_stackel, "")?;
         let book = book.update_sp(sp);
 
         Ok(book)
@@ -566,25 +579,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
         idx: u64,
-    ) -> JitEvmEngineBookkeeping<'a> {
-        let (book, a) = self.build_stack_read(book, 1);
-        let (book, b) = self.build_stack_read(book, idx);
-        let book = self.build_stack_write(book, 1, b);
-        let book = self.build_stack_write(book, idx, a);
-        book
-    }
-
-    fn build_stack_index<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        idx: u64,
-    ) -> IntValue<'a> {
-        // let len_stackel = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
-        let sp_offset = self
-            .type_ptrint
-            .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
-        let sp_int = self.builder.build_int_sub(book.sp, sp_offset, "");
-        sp_int
+    ) -> Result<JitEvmEngineBookkeeping<'a>, InkwellBuilderError> {
+        let (book, a) = self.build_stack_read(book, 1)?;
+        let (book, b) = self.build_stack_read(book, idx)?;
+        let book = self.build_stack_write(book, 1, b)?;
+        let book = self.build_stack_write(book, idx, a)?;
+        Ok(book)
     }
 
     // CALLBACKS FOR OPERATIONS THAT CANNOT HAPPEN PURELY WITHIN THE EVM
@@ -658,28 +658,28 @@ impl<'ctx> JitContractBuilder<'ctx> {
             let execution_context = function.get_nth_param(0).unwrap().into_int_value();
             let execution_context_ptr = self.builder.build_int_to_ptr(
                 execution_context,
-                self.type_ptrint.ptr_type(AddressSpace::Generic),
+                self.type_ptrint.ptr_type(AddressSpace::default()),
                 "",
-            );
+            )?;
             let sp_int = self
                 .builder
-                .build_load(execution_context_ptr, "")
+                .build_load(execution_context_ptr, "")?
                 .into_int_value();
             let max_offset = (EVM_STACK_SIZE - 1) as u64 * EVM_STACK_ELEMENT_SIZE;
             let sp_max = self.builder.build_int_add(
                 sp_int,
                 self.type_ptrint.const_int(max_offset, false),
                 "",
-            );
+            )?;
             let mem_offset =
                 self.builder
-                    .build_int_add(execution_context, self.type_ptrint.size_of(), "");
+                    .build_int_add(execution_context, self.type_ptrint.size_of(), "")?;
             let mem_ptr = self.builder.build_int_to_ptr(
                 mem_offset,
-                self.type_ptrint.ptr_type(AddressSpace::Generic),
+                self.type_ptrint.ptr_type(AddressSpace::default()),
                 "",
-            );
-            let mem = self.builder.build_load(mem_ptr, "").into_int_value();
+            )?;
+            let mem = self.builder.build_load(mem_ptr, "")?.into_int_value();
             // let retval = self.type_retval.const_int(0, false);
             JitEvmEngineBookkeeping {
                 execution_context: execution_context,
@@ -709,25 +709,25 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 block_before,
                 &label,
                 &format!("_{}", i),
-            ));
+            )?);
         }
 
         self.builder.position_at_end(setup_block);
         self.builder
-            .build_unconditional_branch(instructions[0].block);
+            .build_unconditional_branch(instructions[0].block)?;
         instructions[0].phi_setup_block(&setup_book, &setup_block);
 
         // END HANDLER
 
         let end =
-            JitEvmEngineSimpleBlock::new(&self, instructions[ops_len - 1].block, &"end", &"-end");
+            JitEvmEngineSimpleBlock::new(&self, instructions[ops_len - 1].block, &"end", &"-end")?;
         self.builder
             .build_return(Some(&self.type_retval.const_int(0, false)));
 
         // ERROR-JUMPDEST HANDLER
 
         let error_jumpdest =
-            JitEvmEngineSimpleBlock::new(&self, end.block, &"error-jumpdest", &"-error-jumpdest");
+            JitEvmEngineSimpleBlock::new(&self, end.block, &"error-jumpdest", &"-error-jumpdest")?;
         self.builder
             .build_return(Some(&self.type_retval.const_int(1, false)));
 
@@ -757,98 +757,96 @@ impl<'ctx> JitContractBuilder<'ctx> {
             let book = match op {
                 Stop => {
                     let val = self.type_retval.const_int(0, false);
-                    self.builder.build_return(Some(&val));
+                    self.builder.build_return(Some(&val))?;
                     continue; // skip auto-generated jump to next instruction
                 }
                 Push(_, val) => {
                     let val = self.type_stackel.const_int_arbitrary_precision(&val.0);
-                    let book = self.build_stack_push(book, val);
+                    let book = self.build_stack_push(book, val)?;
                     book
                 }
                 Pop => {
-                    let (book, _) = self.build_stack_pop(book);
+                    let (book, _) = self.build_stack_pop(book)?;
                     book
                 }
                 Jumpdest => book,
                 Mstore => {
-                    let (book, offset) = self.build_stack_pop(book);
-                    let (book, vec0, vec1) = self.build_stack_pop_vector(book);
+                    let (book, offset) = self.build_stack_pop(book)?;
+                    let (book, vec0, vec1) = self.build_stack_pop_vector(book)?;
 
                     let shuffled =
                         self.builder
-                            .build_shuffle_vector(vec0, vec1, self.swap_bytes, "");
+                            .build_shuffle_vector(vec0, vec1, self.swap_bytes, "")?;
 
-                    let casted = self.builder.build_int_cast(offset, self.type_ptrint, "");
-                    let mem = self.builder.build_int_add(book.mem, casted, "");
+                    let casted = self.builder.build_int_cast(offset, self.type_ptrint, "")?;
+                    let mem = self.builder.build_int_add(book.mem, casted, "")?;
                     let dest_ptr = self.builder.build_int_to_ptr(
                         mem,
-                        self.type_stackel.ptr_type(AddressSpace::Generic),
+                        self.type_stackel.ptr_type(AddressSpace::default()),
                         "",
-                    );
+                    )?;
 
                     self.builder
-                        .build_store(dest_ptr, shuffled)
-                        .set_alignment(1)
-                        .unwrap();
+                        .build_store(dest_ptr, shuffled)?
+                        .set_alignment(1)?;
 
                     book
                 }
                 Mstore8 => {
-                    let (book, offset) = self.build_stack_pop(book);
-                    let (book, value) = self.build_stack_pop(book);
-                    let value_casted = self.builder.build_int_cast(value, self.type_i8, "");
-                    let offset_casted = self.builder.build_int_cast(offset, self.type_ptrint, "");
+                    let (book, offset) = self.build_stack_pop(book)?;
+                    let (book, value) = self.build_stack_pop(book)?;
+                    let value_casted = self.builder.build_int_cast(value, self.type_i8, "")?;
+                    let offset_casted =
+                        self.builder.build_int_cast(offset, self.type_ptrint, "")?;
 
-                    let mem = self.builder.build_int_add(book.mem, offset_casted, "");
+                    let mem = self.builder.build_int_add(book.mem, offset_casted, "")?;
                     let dest_ptr = self.builder.build_int_to_ptr(
                         mem,
-                        self.type_i8.ptr_type(AddressSpace::Generic),
+                        self.type_i8.ptr_type(AddressSpace::default()),
                         "",
-                    );
+                    )?;
 
-                    self.builder.build_store(dest_ptr, value_casted);
+                    self.builder.build_store(dest_ptr, value_casted)?;
 
                     book
                 }
                 Mload => {
                     // TODO: memory bounds checks
-                    let (book, offset) = self.build_stack_pop(book);
-                    let casted = self.builder.build_int_cast(offset, self.type_ptrint, "");
+                    let (book, offset) = self.build_stack_pop(book)?;
+                    let casted = self.builder.build_int_cast(offset, self.type_ptrint, "")?;
 
-                    let mem0 = self.builder.build_int_add(book.mem, casted, "");
+                    let mem0 = self.builder.build_int_add(book.mem, casted, "")?;
                     let mem1_offset = self
                         .type_ptrint
                         .const_int(EVM_JIT_STACK_ALIGN as u64, false);
-                    let mem1 = self.builder.build_int_add(mem0, mem1_offset, "");
+                    let mem1 = self.builder.build_int_add(mem0, mem1_offset, "")?;
 
                     let mem0_ptr = self.builder.build_int_to_ptr(
                         mem0,
-                        self.type_ivec.ptr_type(AddressSpace::Generic),
+                        self.type_ivec.ptr_type(AddressSpace::default()),
                         "",
-                    );
+                    )?;
                     let mem1_ptr = self.builder.build_int_to_ptr(
                         mem1,
-                        self.type_ivec.ptr_type(AddressSpace::Generic),
+                        self.type_ivec.ptr_type(AddressSpace::default()),
                         "",
-                    );
+                    )?;
 
-                    let vec0 = self.builder.build_load(mem0_ptr, "").into_vector_value();
-                    let vec1 = self.builder.build_load(mem1_ptr, "").into_vector_value();
+                    let vec0 = self.builder.build_load(mem0_ptr, "")?.into_vector_value();
+                    let vec1 = self.builder.build_load(mem1_ptr, "")?.into_vector_value();
 
                     vec0.as_instruction_value()
-                        .unwrap()
-                        .set_alignment(1)
-                        .unwrap();
+                        .ok_or(JitEvmEngineError::NoInstructionValue)?
+                        .set_alignment(1)?;
                     vec1.as_instruction_value()
-                        .unwrap()
-                        .set_alignment(1)
-                        .unwrap();
+                        .ok_or(JitEvmEngineError::NoInstructionValue)?
+                        .set_alignment(1)?;
 
                     let shuffled =
                         self.builder
-                            .build_shuffle_vector(vec0, vec1, self.swap_bytes, "");
+                            .build_shuffle_vector(vec0, vec1, self.swap_bytes, "")?;
 
-                    let book = self.build_stack_push_vector(book, shuffled);
+                    let book = self.build_stack_push_vector(book, shuffled)?;
                     book
                 }
                 Sload => {
@@ -858,10 +856,10 @@ impl<'ctx> JitContractBuilder<'ctx> {
                             callback_sload_func,
                             &[book.execution_context.into(), book.sp.into()],
                             "",
-                        )
+                        )?
                         .try_as_basic_value()
                         .left()
-                        .unwrap()
+                        .ok_or(JitEvmEngineError::NoInstructionValue)?
                         .into_int_value();
                     book
                 }
@@ -872,23 +870,23 @@ impl<'ctx> JitContractBuilder<'ctx> {
                             callback_sstore_func,
                             &[book.execution_context.into(), book.sp.into()],
                             "",
-                        )
+                        )?
                         .try_as_basic_value()
                         .left()
-                        .unwrap()
+                        .ok_or(JitEvmEngineError::NoInstructionValue)?
                         .into_int_value();
-                    let (book, _) = self.build_stack_pop(book);
-                    let (book, _) = self.build_stack_pop(book);
+                    let (book, _) = self.build_stack_pop(book)?;
+                    let (book, _) = self.build_stack_pop(book)?;
                     book
                 }
                 Jump => {
                     // TODO: optimise this, can definitely map solidity opcode target -> basic block label
-                    let (book, target) = self.build_stack_pop(book);
+                    let (book, target) = self.build_stack_pop(book)?;
 
                     if code.jumpdests.is_empty() {
                         // there are no valid jump targets, this Jump has to fail!
                         // TODO: should this be the error block?
-                        self.builder.build_unconditional_branch(end.block);
+                        self.builder.build_unconditional_branch(end.block)?;
                         end.add_incoming(&book, &this);
                     } else {
                         let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
@@ -906,11 +904,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
                                     i, op, j, jmp_i, jmp_target
                                 ),
                                 &format!("_{}_{}", i, j),
-                            ));
+                            )?);
                         }
 
                         self.builder.position_at_end(this.block);
-                        self.builder.build_unconditional_branch(jump_table[0].block);
+                        self.builder
+                            .build_unconditional_branch(jump_table[0].block)?;
                         jump_table[0].add_incoming(&book, &this);
 
                         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
@@ -922,13 +921,13 @@ impl<'ctx> JitContractBuilder<'ctx> {
                                 self.type_stackel.const_int(jmp_target, false),
                                 target,
                                 "",
-                            );
+                            )?;
                             if j + 1 == code.jumpdests.len() {
                                 self.builder.build_conditional_branch(
                                     cmp,
                                     instructions[*jmp_i].block,
                                     error_jumpdest.block,
-                                );
+                                )?;
                                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
                                 error_jumpdest.add_incoming(&book, &jump_table[j]);
                             } else {
@@ -936,7 +935,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                                     cmp,
                                     instructions[*jmp_i].block,
                                     jump_table[j + 1].block,
-                                );
+                                )?;
                                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
                                 jump_table[j + 1].add_incoming(&book, &jump_table[j]);
                             }
@@ -946,12 +945,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     continue; // skip auto-generated jump to next instruction
                 }
                 Jumpi => {
-                    let (book, target) = self.build_stack_pop(book);
-                    let (book, val) = self.build_stack_pop(book);
+                    let (book, target) = self.build_stack_pop(book)?;
+                    let (book, val) = self.build_stack_pop(book)?;
 
                     if code.jumpdests.is_empty() {
                         // there are no valid jump targets, this Jumpi has to fail!
-                        self.builder.build_unconditional_branch(end.block);
+                        self.builder.build_unconditional_branch(end.block)?;
                         end.add_incoming(&book, &this);
                     } else {
                         let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
@@ -969,7 +968,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                                     i, op, j, jmp_i, jmp_target
                                 ),
                                 &format!("_{}_{}", i, j),
-                            ));
+                            )?);
                         }
 
                         self.builder.position_at_end(this.block);
@@ -978,9 +977,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
                             self.type_stackel.const_int(0, false),
                             val,
                             "",
-                        );
-                        self.builder
-                            .build_conditional_branch(cmp, next.block, jump_table[0].block);
+                        )?;
+                        self.builder.build_conditional_branch(
+                            cmp,
+                            next.block,
+                            jump_table[0].block,
+                        )?;
                         next.add_incoming(&book, &this);
                         jump_table[0].add_incoming(&book, &this);
 
@@ -993,13 +995,13 @@ impl<'ctx> JitContractBuilder<'ctx> {
                                 self.type_stackel.const_int(jmp_target, false),
                                 target,
                                 "",
-                            );
+                            )?;
                             if j + 1 == code.jumpdests.len() {
                                 self.builder.build_conditional_branch(
                                     cmp,
                                     instructions[*jmp_i].block,
                                     error_jumpdest.block,
-                                );
+                                )?;
                                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
                                 error_jumpdest.add_incoming(&book, &jump_table[j]);
                             } else {
@@ -1007,7 +1009,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                                     cmp,
                                     instructions[*jmp_i].block,
                                     jump_table[j + 1].block,
-                                );
+                                )?;
                                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
                                 jump_table[j + 1].add_incoming(&book, &jump_table[j]);
                             }
@@ -1016,22 +1018,22 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
                     continue; // skip auto-generated jump to next instruction
                 }
-                Swap1 => self.build_swap(book, 1 + 1),
-                Swap2 => self.build_swap(book, 2 + 1),
-                Swap3 => self.build_swap(book, 3 + 1),
-                Swap4 => self.build_swap(book, 4 + 1),
-                Swap5 => self.build_swap(book, 5 + 1),
-                Swap6 => self.build_swap(book, 6 + 1),
-                Swap7 => self.build_swap(book, 7 + 1),
-                Swap8 => self.build_swap(book, 8 + 1),
-                Swap9 => self.build_swap(book, 9 + 1),
-                Swap10 => self.build_swap(book, 10 + 1),
-                Swap11 => self.build_swap(book, 11 + 1),
-                Swap12 => self.build_swap(book, 12 + 1),
-                Swap13 => self.build_swap(book, 13 + 1),
-                Swap14 => self.build_swap(book, 14 + 1),
-                Swap15 => self.build_swap(book, 15 + 1),
-                Swap16 => self.build_swap(book, 16 + 1),
+                Swap1 => self.build_swap(book, 1 + 1)?,
+                Swap2 => self.build_swap(book, 2 + 1)?,
+                Swap3 => self.build_swap(book, 3 + 1)?,
+                Swap4 => self.build_swap(book, 4 + 1)?,
+                Swap5 => self.build_swap(book, 5 + 1)?,
+                Swap6 => self.build_swap(book, 6 + 1)?,
+                Swap7 => self.build_swap(book, 7 + 1)?,
+                Swap8 => self.build_swap(book, 8 + 1)?,
+                Swap9 => self.build_swap(book, 9 + 1)?,
+                Swap10 => self.build_swap(book, 10 + 1)?,
+                Swap11 => self.build_swap(book, 11 + 1)?,
+                Swap12 => self.build_swap(book, 12 + 1)?,
+                Swap13 => self.build_swap(book, 13 + 1)?,
+                Swap14 => self.build_swap(book, 14 + 1)?,
+                Swap15 => self.build_swap(book, 15 + 1)?,
+                Swap16 => self.build_swap(book, 16 + 1)?,
                 Dup1 => self.build_dup(book, 1)?,
                 Dup2 => self.build_dup(book, 2)?,
                 Dup3 => self.build_dup(book, 3)?,
@@ -1050,41 +1052,43 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Dup16 => self.build_dup(book, 16)?,
                 Iszero => {
                     // TODO: this can also be optimized...
-                    let (book, val) = self.build_stack_pop(book);
+                    let (book, val) = self.build_stack_pop(book)?;
                     let cmp = self.builder.build_int_compare(
                         IntPredicate::EQ,
                         self.type_stackel.const_int(0, false),
                         val,
                         "",
-                    );
+                    )?;
 
                     let push_0 = JitEvmEngineSimpleBlock::new(
                         &self,
                         instructions[i].block,
                         &format!("Instruction #{}: {:?} / push 0", i, op),
                         &format!("_{}_0", i),
-                    );
+                    )?;
                     let push_1 = JitEvmEngineSimpleBlock::new(
                         &self,
                         push_0.block,
                         &format!("Instruction #{}: {:?} / push 1", i, op),
                         &format!("_{}_1", i),
-                    );
+                    )?;
 
                     self.builder.position_at_end(this.block);
                     self.builder
-                        .build_conditional_branch(cmp, push_1.block, push_0.block);
+                        .build_conditional_branch(cmp, push_1.block, push_0.block)?;
                     push_0.add_incoming(&book, &this);
                     push_1.add_incoming(&book, &this);
 
                     self.builder.position_at_end(push_0.block);
-                    let book_0 = self.build_stack_push(book, self.type_stackel.const_int(0, false));
-                    self.builder.build_unconditional_branch(next.block);
+                    let book_0 =
+                        self.build_stack_push(book, self.type_stackel.const_int(0, false))?;
+                    self.builder.build_unconditional_branch(next.block)?;
                     next.add_incoming(&book_0, &push_0);
 
                     self.builder.position_at_end(push_1.block);
-                    let book_1 = self.build_stack_push(book, self.type_stackel.const_int(1, false));
-                    self.builder.build_unconditional_branch(next.block);
+                    let book_1 =
+                        self.build_stack_push(book, self.type_stackel.const_int(1, false))?;
+                    self.builder.build_unconditional_branch(next.block)?;
                     next.add_incoming(&book_1, &push_1);
 
                     continue; // skip auto-generated jump to next instruction
@@ -1111,24 +1115,24 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     op2_llvmnativei256_operation!(self, book, build_int_signed_rem)
                 }
                 Shl => {
-                    let (book, r) = self.build_stack_pop(book);
-                    let (book, l) = self.build_stack_pop(book);
-                    let d = self.builder.build_left_shift(l, r, "");
-                    let book = self.build_stack_push(book, d);
+                    let (book, r) = self.build_stack_pop(book)?;
+                    let (book, l) = self.build_stack_pop(book)?;
+                    let d = self.builder.build_left_shift(l, r, "")?;
+                    let book = self.build_stack_push(book, d)?;
                     book
                 }
                 Shr => {
-                    let (book, r) = self.build_stack_pop(book);
-                    let (book, l) = self.build_stack_pop(book);
-                    let d = self.builder.build_right_shift(l, r, false, "");
-                    let book = self.build_stack_push(book, d);
+                    let (book, r) = self.build_stack_pop(book)?;
+                    let (book, l) = self.build_stack_pop(book)?;
+                    let d = self.builder.build_right_shift(l, r, false, "")?;
+                    let book = self.build_stack_push(book, d)?;
                     book
                 }
                 Sar => {
-                    let (book, r) = self.build_stack_pop(book);
-                    let (book, l) = self.build_stack_pop(book);
-                    let d = self.builder.build_right_shift(l, r, true, "");
-                    let book = self.build_stack_push(book, d);
+                    let (book, r) = self.build_stack_pop(book)?;
+                    let (book, l) = self.build_stack_pop(book)?;
+                    let d = self.builder.build_right_shift(l, r, true, "")?;
+                    let book = self.build_stack_push(book, d)?;
                     book
                 }
                 Exp => {
@@ -1208,78 +1212,78 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     op1_llvmnativei256_operation!(self, book, build_not)
                 }
                 Signextend => {
-                    let (book, x) = self.build_stack_pop(book);
+                    let (book, x) = self.build_stack_pop(book)?;
 
                     let const_32 = self.type_stackel.const_int(32, false);
                     let cmp = self
                         .builder
-                        .build_int_compare(IntPredicate::UGE, x, const_32, "");
+                        .build_int_compare(IntPredicate::UGE, x, const_32, "")?;
 
                     let label = format!("Instruction #{}: Signextend / else", i);
                     let index = format!("_{}", i);
                     let else_block =
-                        JitEvmEngineSimpleBlock::new(&self, this.block, &label, &index);
+                        JitEvmEngineSimpleBlock::new(&self, this.block, &label, &index)?;
                     self.builder.position_at_end(this.block);
                     self.builder
-                        .build_conditional_branch(cmp, next.block, else_block.block);
+                        .build_conditional_branch(cmp, next.block, else_block.block)?;
 
                     next.add_incoming(&book, &this);
                     else_block.add_incoming(&book, &this);
 
                     self.builder.position_at_end(else_block.block);
 
-                    let (book, y) = self.build_stack_pop(book);
+                    let (book, y) = self.build_stack_pop(book)?;
 
                     let const_1 = self.type_stackel.const_int(1, false);
                     let const_7 = self.type_stackel.const_int(7, false);
                     let const_8 = self.type_stackel.const_int(8, false);
 
-                    let x_8 = self.builder.build_int_mul(x, const_8, "");
-                    let bit_index = self.builder.build_int_add(x_8, const_7, "");
-                    let bit = self.builder.build_left_shift(const_1, bit_index, "");
-                    let mask = self.builder.build_int_sub(bit, const_1, "");
+                    let x_8 = self.builder.build_int_mul(x, const_8, "")?;
+                    let bit_index = self.builder.build_int_add(x_8, const_7, "")?;
+                    let bit = self.builder.build_left_shift(const_1, bit_index, "")?;
+                    let mask = self.builder.build_int_sub(bit, const_1, "")?;
 
-                    let sign = self.builder.build_and(y, bit, "");
-                    let is_signed = self
-                        .builder
-                        .build_int_compare(IntPredicate::EQ, sign, bit, "");
+                    let sign = self.builder.build_and(y, bit, "")?;
+                    let is_signed =
+                        self.builder
+                            .build_int_compare(IntPredicate::EQ, sign, bit, "")?;
 
-                    let not_mask = self.builder.build_not(mask, "");
-                    let extended = self.builder.build_or(y, not_mask, "");
-                    let unextended = self.builder.build_and(y, mask, "");
+                    let not_mask = self.builder.build_not(mask, "")?;
+                    let extended = self.builder.build_or(y, not_mask, "")?;
+                    let unextended = self.builder.build_and(y, mask, "")?;
 
                     let result = self
                         .builder
-                        .build_select(is_signed, extended, unextended, "")
+                        .build_select(is_signed, extended, unextended, "")?
                         .into_int_value();
 
-                    self.build_stack_push(book, result);
-                    self.builder.build_unconditional_branch(next.block);
+                    self.build_stack_push(book, result)?;
+                    self.builder.build_unconditional_branch(next.block)?;
 
                     continue; // skip auto-generated jump to next instruction
                 }
                 AugmentedPushJump(_, val) => {
                     if code.jumpdests.is_empty() {
                         // there are no valid jump targets, this Jump has to fail!
-                        self.builder.build_unconditional_branch(end.block);
+                        self.builder.build_unconditional_branch(end.block)?;
                         end.add_incoming(&book, &this);
                     } else {
                         // retrieve the corresponding jump target (panic if not a valid jump target) ...
                         let jmp_i = code.target2opidx[val];
                         // ... and jump to there!
                         self.builder
-                            .build_unconditional_branch(instructions[jmp_i].block);
+                            .build_unconditional_branch(instructions[jmp_i].block)?;
                         instructions[jmp_i].add_incoming(&book, &this);
                     }
 
                     continue; // skip auto-generated jump to next instruction
                 }
                 AugmentedPushJumpi(_, val) => {
-                    let (book, condition) = self.build_stack_pop(book);
+                    let (book, condition) = self.build_stack_pop(book)?;
 
                     if code.jumpdests.is_empty() {
                         // there are no valid jump targets, this Jumpi has to fail!
-                        self.builder.build_unconditional_branch(end.block);
+                        self.builder.build_unconditional_branch(end.block)?;
                         end.add_incoming(&book, &this);
                     } else {
                         // retrieve the corresponding jump target (panic if not a valid jump target) ...
@@ -1290,12 +1294,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
                             self.type_stackel.const_int(0, false),
                             condition,
                             "",
-                        );
+                        )?;
                         self.builder.build_conditional_branch(
                             cmp,
                             next.block,
                             instructions[jmp_i].block,
-                        );
+                        )?;
                         next.add_incoming(&book, &this);
                         instructions[jmp_i].add_incoming(&book, &this);
                     }
