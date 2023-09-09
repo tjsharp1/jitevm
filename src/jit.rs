@@ -25,16 +25,15 @@ use context::JitEvmPtrs;
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize) -> u64;
 
-// TODO: 256 bit double-add for now, will need to calc byte size of exp for gas accounting
-macro_rules! op2_double_add_exp {
-    ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, 1) => {{
-        let zero = $self.type_stackel.const_int(0, false);
+macro_rules! op2_i256_exp {
+    ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, loop_bit) => {{
         let one = $self.type_stackel.const_int(1, false);
+        let zero = $self.type_stackel.const_int(0, false);
 
-        let and = $self.builder.build_and($exp, $mask, "")?;
+        let bit = $self.builder.build_and($exp, $mask, "")?;
         let is_zero_bit = $self
             .builder
-            .build_int_compare(IntPredicate::EQ, and, zero, "")?;
+            .build_int_compare(IntPredicate::EQ, bit, zero, "")?;
         $mask = $self.builder.build_right_shift($mask, one, false, "")?;
 
         $accum = $self.builder.build_int_mul($accum, $accum, "")?;
@@ -42,31 +41,12 @@ macro_rules! op2_double_add_exp {
             .builder
             .build_select(is_zero_bit, one, $base, "")?
             .into_int_value();
-        $accum = $self.builder.build_int_add($accum, mul, "")?;
-    }};
-    ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, 4) => {{
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 1);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 1);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 1);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 1);
-    }};
-    ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, 16) => {{
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 4);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 4);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 4);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 4);
-    }};
-    ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, 64) => {{
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 16);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 16);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 16);
-        op2_double_add_exp!($self, $book, $accum, $base, $exp, $mask, 16);
+        $accum = $self.builder.build_int_mul($accum, mul, "")?;
     }};
     ($self:ident, $book:ident, $this:ident, $next:ident, $i:ident) => {{
         let (book, a) = $self.build_stack_pop($book)?;
         let (book, exp) = $self.build_stack_pop(book)?;
 
-        let const_255 = $self.type_stackel.const_int(255, false);
         let const_1 = $self.type_stackel.const_int(1, false);
         let zero = $self.type_stackel.const_int(0, false);
         let is_zero = $self
@@ -89,50 +69,86 @@ macro_rules! op2_double_add_exp {
 
         //// THEN BLOCK
         $self.builder.position_at_end(then_block.block);
-        // TODO: constructor for this.....
-        let then_book = JitEvmEngineBookkeeping {
-            execution_context: then_block
-                .phi_execution_context
-                .as_basic_value()
-                .into_int_value(),
-            sp_min: then_block.phi_sp_min.as_basic_value().into_int_value(),
-            sp_max: then_block.phi_sp_max.as_basic_value().into_int_value(),
-            sp: then_block.phi_sp.as_basic_value().into_int_value(),
-            mem: then_block.phi_mem.as_basic_value().into_int_value(),
-        };
+
+        let then_book = then_block.book();
         let then_book = $self.build_stack_push(then_book, const_1)?;
+
         $next.add_incoming(&then_book, &then_block);
 
         $self.builder.build_unconditional_branch($next.block)?;
 
         //// ELSE BLOCK
         $self.builder.position_at_end(else_block.block);
-        let else_book = JitEvmEngineBookkeeping {
-            execution_context: else_block
-                .phi_execution_context
-                .as_basic_value()
-                .into_int_value(),
-            sp_min: else_block.phi_sp_min.as_basic_value().into_int_value(),
-            sp_max: else_block.phi_sp_max.as_basic_value().into_int_value(),
-            sp: else_block.phi_sp.as_basic_value().into_int_value(),
-            mem: else_block.phi_mem.as_basic_value().into_int_value(),
-        };
-        let mut mask = $self
-            .builder
-            .build_left_shift(const_1, const_255, "mask_value")?;
+        let else_book = else_block.book();
 
-        let mut accum = $self
+        let const8 = $self.type_ptrint.const_int(8, false);
+        let const1 = $self.type_ptrint.const_int(1, false);
+        let msbyte = $self.build_get_msbyte(exp)?;
+        let bit = $self.builder.build_int_mul(msbyte, const8, "")?;
+        let shift = $self.builder.build_int_sub(bit, const1, "")?;
+        let shift_cast = $self
             .builder
-            .build_bitcast(zero, $self.type_stackel, "accum_copy")?
+            .build_int_cast(shift, $self.type_stackel, "")?;
+
+        let mask_init = $self.builder.build_left_shift(const_1, shift_cast, "")?;
+
+        let accum_init = $self
+            .builder
+            .build_bitcast(const_1, $self.type_stackel, "")?
             .into_int_value();
-        op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
-        op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
-        op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
-        op2_double_add_exp!($self, else_book, accum, a, exp, mask, 64);
 
-        let else_book = $self.build_stack_push(else_book, accum)?;
+        let loop_label = format!("Instruction #{}: Exp / loop", $i);
+        let loop_end_label = format!("Instruction #{}: Exp / loop_end", $i);
+
+        let loop_block =
+            JitEvmEngineSimpleBlock::new(&$self, else_block.block, &loop_label, &index)?;
+        let loop_end_block =
+            JitEvmEngineSimpleBlock::new(&$self, loop_block.block, &loop_end_label, &index)?;
+
+        let loop_book = loop_block.book();
+        let loop_end_book = loop_end_block.book();
+
+        loop_block.add_incoming(&else_book, &else_block);
+        loop_block.add_incoming(&loop_book, &loop_block);
+        loop_end_block.add_incoming(&loop_book, &loop_block);
+
+        $self.builder.position_at_end(else_block.block);
+        $self.builder.build_unconditional_branch(loop_block.block)?;
+
+        $self.builder.position_at_end(loop_block.block);
+        let mask_phi = $self.builder.build_phi($self.type_stackel, "")?;
+        let accum_phi = $self.builder.build_phi($self.type_stackel, "")?;
+        accum_phi.add_incoming(&[(&accum_init, else_block.block)]);
+        mask_phi.add_incoming(&[(&mask_init, else_block.block)]);
+        let mut mask = mask_phi.as_basic_value().into_int_value();
+        let mut accum = accum_phi.as_basic_value().into_int_value();
+
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+        op2_i256_exp!($self, loop_book, accum, a, exp, mask, loop_bit);
+
+        mask_phi.add_incoming(&[(&mask, loop_block.block)]);
+        accum_phi.add_incoming(&[(&accum, loop_block.block)]);
+        let cond = $self
+            .builder
+            .build_int_compare(IntPredicate::EQ, mask, zero, "")?;
+        $self
+            .builder
+            .build_conditional_branch(cond, loop_end_block.block, loop_block.block)?;
+
+        $self.builder.position_at_end(loop_end_block.block);
+        let final_accum = $self.builder.build_phi($self.type_stackel, "")?;
+        final_accum.add_incoming(&[(&accum, loop_block.block)]);
+
+        $self.build_stack_push(loop_end_book, final_accum.as_basic_value().into_int_value())?;
         $self.builder.build_unconditional_branch($next.block)?;
-        $next.add_incoming(&else_book, &else_block);
+
+        $next.add_incoming(&loop_end_book, &loop_end_block);
     }};
 }
 
@@ -284,6 +300,16 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         })
     }
 
+    pub fn book(&self) -> JitEvmEngineBookkeeping<'ctx> {
+        JitEvmEngineBookkeeping {
+            execution_context: self.phi_execution_context.as_basic_value().into_int_value(),
+            sp_min: self.phi_sp_min.as_basic_value().into_int_value(),
+            sp_max: self.phi_sp_max.as_basic_value().into_int_value(),
+            sp: self.phi_sp.as_basic_value().into_int_value(),
+            mem: self.phi_mem.as_basic_value().into_int_value(),
+        }
+    }
+
     pub fn phi_setup_block(&self, book: &JitEvmEngineBookkeeping<'ctx>, prev: &BasicBlock<'ctx>) {
         self.phi_execution_context
             .add_incoming(&[(&book.execution_context, *prev)]);
@@ -348,7 +374,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
         let module = context.create_module(name);
         let builder = context.create_builder();
-        let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None)?; //OptimizationLevel::Aggressive)?;
+        let execution_engine = module.create_jit_execution_engine(OptimizationLevel::Aggressive)?; //OptimizationLevel::None)?;
 
         let target_data = execution_engine.get_target_data();
         let type_ptrint = context.ptr_sized_int_type(&target_data, None); // type for pointers (stack pointer, host interaction)
@@ -411,6 +437,183 @@ impl<'ctx> JitContractBuilder<'ctx> {
     }
 
     //// HELPER FUNCTIONS
+
+    #[allow(dead_code)]
+    fn build_print_u64<'a>(
+        &'a self,
+        val: IntValue<'a>,
+        hex: bool,
+    ) -> Result<(), InkwellBuilderError> {
+        let fun = self
+            .module
+            .get_function("callback_print_u64")
+            .expect("No fun here");
+        let ptr = self.builder.build_alloca(self.type_stackel, "")?;
+
+        let hex = self.context.bool_type().const_int(hex as u64, false);
+        self.builder.build_store(ptr, val)?;
+        self.builder
+            .build_call(fun, &[ptr.into(), hex.into()], "")?;
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn build_print_u256<'a>(
+        &'a self,
+        val: IntValue<'a>,
+        hex: bool,
+    ) -> Result<(), InkwellBuilderError> {
+        let fun = self
+            .module
+            .get_function("callback_print_u256")
+            .expect("No fun here");
+        let ptr = self.builder.build_alloca(self.type_stackel, "")?;
+
+        let hex = self.context.bool_type().const_int(hex as u64, false);
+        self.builder.build_store(ptr, val)?;
+        self.builder
+            .build_call(fun, &[ptr.into(), hex.into()], "")?;
+        Ok(())
+    }
+
+    fn build_get_msbyte<'a>(
+        &'a self,
+        val: IntValue<'a>,
+    ) -> Result<IntValue<'a>, InkwellBuilderError> {
+        let byte_count = self.type_stackel.const_int(0, false);
+        let const8 = self.type_stackel.const_int(8, false);
+        let const1 = self.type_stackel.const_int(1, false);
+        let const0 = self.type_stackel.const_int(0, false);
+
+        let bit_width = (self.type_stackel.get_bit_width() / 2) as u64;
+        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let bytes = self
+            .builder
+            .build_int_unsigned_div(shift_width, const8, "")?;
+
+        let word_shifted = self
+            .builder
+            .build_right_shift(val, shift_width, false, "")?;
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
+
+        let to_add = self
+            .builder
+            .build_select(is_zero, const0, bytes, "")?
+            .into_int_value();
+        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
+        let val = self
+            .builder
+            .build_select(is_zero, val, word_shifted, "")?
+            .into_int_value();
+        // 16-byte
+        let bit_width = bit_width / 2;
+        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let bytes = self
+            .builder
+            .build_int_unsigned_div(shift_width, const8, "")?;
+
+        let word_shifted = self
+            .builder
+            .build_right_shift(val, shift_width, false, "")?;
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
+
+        let to_add = self
+            .builder
+            .build_select(is_zero, const0, bytes, "")?
+            .into_int_value();
+        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
+        let val = self
+            .builder
+            .build_select(is_zero, val, word_shifted, "")?
+            .into_int_value();
+        // 8-byte
+        let bit_width = bit_width / 2;
+        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let bytes = self
+            .builder
+            .build_int_unsigned_div(shift_width, const8, "")?;
+
+        let word_shifted = self
+            .builder
+            .build_right_shift(val, shift_width, false, "")?;
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
+
+        let to_add = self
+            .builder
+            .build_select(is_zero, const0, bytes, "")?
+            .into_int_value();
+        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
+        let val = self
+            .builder
+            .build_select(is_zero, val, word_shifted, "")?
+            .into_int_value();
+        // 4-byte
+        let bit_width = bit_width / 2;
+        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let bytes = self
+            .builder
+            .build_int_unsigned_div(shift_width, const8, "")?;
+
+        let word_shifted = self
+            .builder
+            .build_right_shift(val, shift_width, false, "")?;
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
+
+        let to_add = self
+            .builder
+            .build_select(is_zero, const0, bytes, "")?
+            .into_int_value();
+        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
+        let val = self
+            .builder
+            .build_select(is_zero, val, word_shifted, "")?
+            .into_int_value();
+        // 2-byte
+        let bit_width = bit_width / 2;
+        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let bytes = self
+            .builder
+            .build_int_unsigned_div(shift_width, const8, "")?;
+
+        let word_shifted = self
+            .builder
+            .build_right_shift(val, shift_width, false, "")?;
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
+
+        let to_add = self
+            .builder
+            .build_select(is_zero, const0, bytes, "")?
+            .into_int_value();
+        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
+        let val = self
+            .builder
+            .build_select(is_zero, val, word_shifted, "")?
+            .into_int_value();
+        // 1-byte
+        let is_zero = self
+            .builder
+            .build_int_compare(IntPredicate::EQ, val, const0, "")?;
+        let to_add = self
+            .builder
+            .build_select(is_zero, const0, const1, "")?
+            .into_int_value();
+        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
+        let casted = self
+            .builder
+            .build_int_cast(byte_count, self.type_ptrint, "")?;
+
+        Ok(casted)
+    }
 
     fn build_stack_push<'a>(
         &'a self,
@@ -589,6 +792,24 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
     // CALLBACKS FOR OPERATIONS THAT CANNOT HAPPEN PURELY WITHIN THE EVM
 
+    pub extern "C" fn callback_print_u64(ptr: usize, hex: bool) {
+        let item: &u64 = unsafe { &*(ptr as *const _) };
+        if hex {
+            println!("U64 value 0x{:x}", item);
+        } else {
+            println!("U64 value {}", item);
+        }
+    }
+
+    pub extern "C" fn callback_print_u256(ptr: usize, hex: bool) {
+        let item: &U256 = unsafe { &*(ptr as *const _) };
+        if hex {
+            println!("U256 value 0x{:x}", item);
+        } else {
+            println!("U256 value {}", item);
+        }
+    }
+
     pub extern "C" fn callback_sload(exectx: usize, sp: usize) -> u64 {
         let rawptrs = JitEvmPtrs::from_raw(exectx);
 
@@ -619,6 +840,26 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
     pub fn build(self, code: IndexedEvmCode) -> Result<JitEvmContract<'ctx>, JitEvmEngineError> {
         // CALLBACKS
+
+        let cb_type = self.type_retval.fn_type(
+            &[self.type_ptrint.into(), self.context.bool_type().into()],
+            false,
+        );
+        let cb_func = self
+            .module
+            .add_function("callback_print_u64", cb_type, None);
+        self.execution_engine
+            .add_global_mapping(&cb_func, JitContractBuilder::callback_print_u64 as usize);
+
+        let cb_type = self.type_retval.fn_type(
+            &[self.type_ptrint.into(), self.context.bool_type().into()],
+            false,
+        );
+        let cb_func = self
+            .module
+            .add_function("callback_print_u256", cb_type, None);
+        self.execution_engine
+            .add_global_mapping(&cb_func, JitContractBuilder::callback_print_u256 as usize);
 
         let callback_sload_func = {
             // SLOAD
@@ -722,14 +963,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let end =
             JitEvmEngineSimpleBlock::new(&self, instructions[ops_len - 1].block, &"end", &"-end")?;
         self.builder
-            .build_return(Some(&self.type_retval.const_int(0, false)));
+            .build_return(Some(&self.type_retval.const_int(0, false)))?;
 
         // ERROR-JUMPDEST HANDLER
 
         let error_jumpdest =
             JitEvmEngineSimpleBlock::new(&self, end.block, &"error-jumpdest", &"-error-jumpdest")?;
         self.builder
-            .build_return(Some(&self.type_retval.const_int(1, false)));
+            .build_return(Some(&self.type_retval.const_int(1, false)))?;
 
         // RENDER INSTRUCTIONS
 
@@ -739,14 +980,8 @@ impl<'ctx> JitContractBuilder<'ctx> {
             let this = instructions[i];
 
             self.builder.position_at_end(this.block);
-            let book = JitEvmEngineBookkeeping {
-                execution_context: this.phi_execution_context.as_basic_value().into_int_value(),
-                sp_min: this.phi_sp_min.as_basic_value().into_int_value(),
-                sp_max: this.phi_sp_max.as_basic_value().into_int_value(),
-                sp: this.phi_sp.as_basic_value().into_int_value(),
-                mem: this.phi_mem.as_basic_value().into_int_value(),
-                // retval: this.phi_retval.as_basic_value().into_int_value(),
-            };
+
+            let book = this.book();
 
             let next = if i + 1 == ops_len {
                 end
@@ -1136,7 +1371,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     book
                 }
                 Exp => {
-                    op2_double_add_exp!(self, book, this, next, i);
+                    op2_i256_exp!(self, book, this, next, i);
                     continue;
                 }
                 Eq => {
@@ -1312,7 +1547,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 }
             };
 
-            self.builder.build_unconditional_branch(next.block);
+            self.builder.build_unconditional_branch(next.block)?;
             next.add_incoming(&book, &this);
         }
 
@@ -1337,8 +1572,8 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     &triple,
                     &cpu,
                     &features,
-                    //OptimizationLevel::Aggressive,
-                    OptimizationLevel::None,
+                    OptimizationLevel::Aggressive,
+                    //OptimizationLevel::None,
                     RelocMode::Default,
                     CodeModel::Default,
                 )

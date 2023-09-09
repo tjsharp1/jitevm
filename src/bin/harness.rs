@@ -49,13 +49,10 @@ fn main() {
     _test(U256::one(), U256::one());
 
     for _i in 0..1000 {
-        let t = rand::thread_rng().gen::<u8>();
+        let a = rand::thread_rng().gen::<[u8; 32]>();
         let b = rand::thread_rng().gen::<[u8; 32]>();
 
-        let mut a: [u8; 32] = [0u8; 32];
-        a[31] = t;
         let a = U256::from_big_endian(&a);
-        let b = U256::from_big_endian(&b);
-        _test(a, b);
+        _test(a, U256::from_big_endian(&b));
     }
 }
