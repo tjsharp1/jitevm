@@ -1,5 +1,6 @@
 use crate::code::{EvmOp, IndexedEvmCode};
 use crate::constants::*;
+use hex_literal::hex;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::{Builder, BuilderError as InkwellBuilderError};
 use inkwell::context::Context;
@@ -12,6 +13,7 @@ use inkwell::AddressSpace;
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
 use primitive_types::U256;
+use sha3::{Digest, Keccak256};
 use std::convert::From;
 use thiserror::Error;
 
@@ -24,6 +26,9 @@ pub use context::JitEvmExecutionContext;
 use context::JitEvmPtrs;
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize) -> u64;
+
+pub const KECCAK_EMPTY: [u8; 32] =
+    hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 
 macro_rules! op2_i256_exp {
     ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, loop_bit) => {{
@@ -615,6 +620,16 @@ impl<'ctx> JitContractBuilder<'ctx> {
         Ok(casted)
     }
 
+    fn build_stack_inc<'a>(
+        &'a self,
+        book: JitEvmEngineBookkeeping<'a>,
+    ) -> Result<JitEvmEngineBookkeeping<'a>, InkwellBuilderError> {
+        let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
+
+        Ok(book.update_sp(sp))
+    }
+
     fn build_stack_push<'a>(
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
@@ -792,6 +807,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
     // CALLBACKS FOR OPERATIONS THAT CANNOT HAPPEN PURELY WITHIN THE EVM
 
+    pub extern "C" fn callback_sha3(exectx: usize, sp: usize, ptr: usize, size: usize) {
+        let rawptrs = JitEvmPtrs::from_raw(exectx);
+
+        let hash = Keccak256::digest(rawptrs.mem_slice(ptr, size));
+
+        *rawptrs.stack_mut(sp, 0) = U256::from(hash.as_slice());
+    }
+
     pub extern "C" fn callback_print_u64(ptr: usize, hex: bool) {
         let item: &u64 = unsafe { &*(ptr as *const _) };
         if hex {
@@ -840,8 +863,9 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
     pub fn build(self, code: IndexedEvmCode) -> Result<JitEvmContract<'ctx>, JitEvmEngineError> {
         // CALLBACKS
+        let void_type = self.context.void_type();
 
-        let cb_type = self.type_retval.fn_type(
+        let cb_type = void_type.fn_type(
             &[self.type_ptrint.into(), self.context.bool_type().into()],
             false,
         );
@@ -851,7 +875,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
         self.execution_engine
             .add_global_mapping(&cb_func, JitContractBuilder::callback_print_u64 as usize);
 
-        let cb_type = self.type_retval.fn_type(
+        let cb_type = void_type.fn_type(
             &[self.type_ptrint.into(), self.context.bool_type().into()],
             false,
         );
@@ -860,6 +884,23 @@ impl<'ctx> JitContractBuilder<'ctx> {
             .add_function("callback_print_u256", cb_type, None);
         self.execution_engine
             .add_global_mapping(&cb_func, JitContractBuilder::callback_print_u256 as usize);
+
+        let callback_sha3_func = {
+            // SHA3
+            let cb_type = void_type.fn_type(
+                &[
+                    self.type_ptrint.into(),
+                    self.type_ptrint.into(),
+                    self.type_ptrint.into(),
+                    self.type_ptrint.into(),
+                ],
+                false,
+            );
+            let cb_func = self.module.add_function("callback_sha3", cb_type, None);
+            self.execution_engine
+                .add_global_mapping(&cb_func, JitContractBuilder::callback_sha3 as usize);
+            cb_func
+        };
 
         let callback_sload_func = {
             // SLOAD
@@ -1114,8 +1155,27 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     let (book, _) = self.build_stack_pop(book)?;
                     book
                 }
+                Sha3 => {
+                    let (book, offset) = self.build_stack_pop(book)?;
+                    let (book, size) = self.build_stack_pop(book)?;
+
+                    let offset = self.builder.build_int_cast(offset, self.type_ptrint, "")?;
+                    let size = self.builder.build_int_cast(size, self.type_ptrint, "")?;
+
+                    self.builder.build_call(
+                        callback_sha3_func,
+                        &[
+                            book.execution_context.into(),
+                            book.sp.into(),
+                            offset.into(),
+                            size.into(),
+                        ],
+                        "",
+                    )?;
+
+                    self.build_stack_inc(book)?
+                }
                 Jump => {
-                    // TODO: optimise this, can definitely map solidity opcode target -> basic block label
                     let (book, target) = self.build_stack_pop(book)?;
 
                     if code.jumpdests.is_empty() {
@@ -1445,6 +1505,56 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 }
                 Not => {
                     op1_llvmnativei256_operation!(self, book, build_not)
+                }
+                Addmod => {
+                    let (book, a) = self.build_stack_pop(book)?;
+                    let (book, b) = self.build_stack_pop(book)?;
+                    let (book, n) = self.build_stack_pop(book)?;
+
+                    let width = self.type_stackel.get_bit_width() * 2;
+                    let type_iup = self.context.custom_width_int_type(width);
+
+                    let a_up = self
+                        .builder
+                        .build_int_cast_sign_flag(a, type_iup, false, "")?;
+                    let b_up = self
+                        .builder
+                        .build_int_cast_sign_flag(b, type_iup, false, "")?;
+                    let n_up = self
+                        .builder
+                        .build_int_cast_sign_flag(n, type_iup, false, "")?;
+
+                    let result = self.builder.build_int_add(a_up, b_up, "")?;
+                    let result = self.builder.build_int_unsigned_rem(result, n_up, "")?;
+
+                    let result = self.builder.build_int_cast(result, self.type_stackel, "")?;
+
+                    self.build_stack_push(book, result)?
+                }
+                Mulmod => {
+                    let (book, a) = self.build_stack_pop(book)?;
+                    let (book, b) = self.build_stack_pop(book)?;
+                    let (book, n) = self.build_stack_pop(book)?;
+
+                    let width = self.type_stackel.get_bit_width() * 2;
+                    let type_iup = self.context.custom_width_int_type(width);
+
+                    let a_up = self
+                        .builder
+                        .build_int_cast_sign_flag(a, type_iup, false, "")?;
+                    let b_up = self
+                        .builder
+                        .build_int_cast_sign_flag(b, type_iup, false, "")?;
+                    let n_up = self
+                        .builder
+                        .build_int_cast_sign_flag(n, type_iup, false, "")?;
+
+                    let result = self.builder.build_int_mul(a_up, b_up, "")?;
+                    let result = self.builder.build_int_unsigned_rem(result, n_up, "")?;
+
+                    let result = self.builder.build_int_cast(result, self.type_stackel, "")?;
+
+                    self.build_stack_push(book, result)?
                 }
                 Signextend => {
                     let (book, x) = self.build_stack_pop(book)?;

@@ -4,10 +4,11 @@ use crate::{
 };
 use paste::paste;
 use primitive_types::U256;
-use rand::Rng;
+use rand::{Rng, RngCore};
+use sha3::{Digest, Keccak256};
 use std::collections::{HashMap, HashSet};
 
-fn test_jit_storage(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
+fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
     use crate::code::EvmCode;
     use inkwell::context::Context;
 
@@ -23,6 +24,54 @@ fn test_jit_storage(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionCont
         .call(execution_context)
         .expect("Contract call failed");
     assert_eq!(ret, 0);
+}
+
+#[test]
+fn operations_jit_test_sha3() {
+    for _ in 0..1000 {
+        let mut execution_context = JitEvmExecutionContext::new();
+
+        let mut expected_store = HashMap::new();
+        let mut ops = Vec::new();
+
+        let mut offset = 0;
+        let mem_range = 0..512;
+        let mut a = vec![0u8; 512];
+
+        for i in 0..20 {
+            rand::thread_rng().fill_bytes(&mut a);
+            let r = rand::thread_rng().gen_range(mem_range.clone());
+
+            let off_range = offset..(offset + r);
+            execution_context.memory[off_range].copy_from_slice(&a[..r]);
+
+            let value = U256::from(Keccak256::digest(&a[..r]).as_slice());
+            expected_store.insert(U256::from(i), value);
+
+            ops.push(EvmOp::Push(32, U256::from(r)));
+            ops.push(EvmOp::Push(32, U256::from(offset)));
+            ops.push(EvmOp::Sha3);
+            ops.push(EvmOp::Push(32, U256::from(i)));
+            ops.push(EvmOp::Sstore);
+
+            offset += r;
+        }
+
+        test_jit(ops, &mut execution_context);
+
+        let JitEvmExecutionContext { storage, .. } = execution_context;
+
+        let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+        let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+        let diff = expected_keys.symmetric_difference(&actual_keys).count();
+        assert_eq!(diff, 0);
+
+        for (key, value) in expected_store.iter() {
+            let stored = *storage.get(key).expect("Storage should have item");
+            assert_eq!(*value, stored);
+        }
+    }
 }
 
 #[test]
@@ -48,7 +97,7 @@ fn operations_jit_test_sstore() {
         }
 
         let mut execution_context = JitEvmExecutionContext::new();
-        test_jit_storage(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -91,7 +140,7 @@ fn operations_jit_test_sload() {
             ops.push(EvmOp::Mstore);
         }
 
-        test_jit_storage(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -133,7 +182,7 @@ fn operations_jit_test_mload() {
             ops.push(EvmOp::Mload);
         }
 
-        test_jit_storage(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context);
 
         let JitEvmExecutionContext { stack, .. } = execution_context;
 
@@ -170,7 +219,7 @@ fn operations_jit_test_mstore8() {
             ops.push(EvmOp::Mstore8);
         }
 
-        test_jit_storage(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -207,7 +256,7 @@ fn operations_jit_test_mstore() {
             ops.push(EvmOp::Mstore);
         }
 
-        test_jit_storage(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -232,7 +281,7 @@ macro_rules! test_op1 {
                 fn _test(a: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
 
-                    test_jit_storage(vec![
+                    test_jit(vec![
                         Push(32, a),
                         $evmop,
                     ], &mut ctx);
@@ -269,7 +318,7 @@ macro_rules! test_op2 {
                 fn _test(a: U256, b: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
 
-                    test_jit_storage(vec![
+                    test_jit(vec![
                         Push(32, b),
                         Push(32, a),
                         $evmop,
@@ -311,7 +360,7 @@ macro_rules! test_op2_small {
                 fn _test(a: U256, b: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
 
-                    test_jit_storage(vec![
+                    test_jit(vec![
                         Push(32, b),
                         Push(32, a),
                         $evmop,
@@ -364,7 +413,7 @@ macro_rules! test_op_dup {
                     ops.push($evmop);
                     let mut ctx = JitEvmExecutionContext::new();
 
-                    test_jit_storage(ops.clone(), &mut ctx);
+                    test_jit(ops.clone(), &mut ctx);
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
                     let d = &stack[..original_stack.len() + 1];
@@ -405,7 +454,7 @@ macro_rules! test_op_swap {
                     ops.push($evmop);
 
                     let mut ctx = JitEvmExecutionContext::new();
-                    test_jit_storage(ops.clone(), &mut ctx);
+                    test_jit(ops.clone(), &mut ctx);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = &stack[..original_stack.len()];
@@ -440,7 +489,46 @@ macro_rules! test_op3 {
         paste! {
             #[test]
             fn [<operations_jit_equivalence_ $fname>]() {
-                todo!("OP3!!!!")
+                use crate::code::EvmOp::*;
+                use crate::operations;
+
+                fn _test(a: U256, b: U256, c: U256) {
+                    let mut ctx = JitEvmExecutionContext::new();
+
+                    test_jit(vec![
+                        Push(32, c),
+                        Push(32, b),
+                        Push(32, a),
+                        $evmop,
+                    ], &mut ctx);
+                    let JitEvmExecutionContext { stack, .. } = ctx;
+                    let d = stack[0];
+                    let d_ = $opname(a, b, c);
+                    if d != d_ {
+                        println!("a = {:?} / d = {:?} / d' = {:?}", a, d, d_);
+                    }
+                    assert_eq!(d, d_);
+                }
+
+                _test(U256::zero(), U256::zero(), U256::zero());
+                _test(U256::zero(), U256::zero(), U256::one());
+                _test(U256::zero(), U256::one(), U256::zero());
+                _test(U256::zero(), U256::one(), U256::one());
+                _test(U256::one(), U256::zero(), U256::zero());
+                _test(U256::one(), U256::zero(), U256::one());
+                _test(U256::one(), U256::one(), U256::zero());
+                _test(U256::one(), U256::one(), U256::one());
+
+                for _i in 0..1000 {
+                    let a = rand::thread_rng().gen::<[u8; 32]>();
+                    let b = rand::thread_rng().gen::<[u8; 32]>();
+                    let c = rand::thread_rng().gen::<[u8; 32]>();
+                    let a = U256::from_big_endian(&a);
+                    let b = U256::from_big_endian(&b);
+                    let c = U256::from_big_endian(&c);
+
+                    _test(a, b, c);
+                }
             }
         }
     };
@@ -459,8 +547,8 @@ test_op2!(gt, EvmOp::Gt, operations::Gt);
 test_op2!(slt, EvmOp::Slt, operations::Slt);
 test_op2!(sgt, EvmOp::Sgt, operations::Sgt);
 
-test_op3!(addmod, EvmOp::AddMod, operations::AddMod);
-test_op3!(mulmod, EvmOp::MulMod, operations::MulMod);
+test_op3!(addmod, EvmOp::Addmod, operations::Addmod);
+test_op3!(mulmod, EvmOp::Mulmod, operations::Mulmod);
 test_op2!(exp, EvmOp::Exp, operations::Exp);
 
 test_op2!(and, EvmOp::And, operations::And);
@@ -506,7 +594,6 @@ test_op_swap!(swap15, EvmOp::Swap15, 15);
 test_op_swap!(swap16, EvmOp::Swap16, 16);
 //Stop,
 //Byte,
-//Sha3,   // 0x20 = 32
 //Address,
 //Balance,
 //Origin,

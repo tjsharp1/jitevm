@@ -53,6 +53,10 @@ impl JitEvmPtrs {
         storage.insert(key, value)
     }
 
+    pub fn mem_slice(&self, ptr: usize, size: usize) -> &[u8] {
+        unsafe { std::slice::from_raw_parts((self.memory + ptr) as *const u8, size) }
+    }
+
     // TODO: panics on stack bounds
     pub fn stack(&self, sp: usize, offset: usize) -> &U256 {
         unsafe { &*((sp - offset * EVM_STACK_ELEMENT_SIZE as usize) as *const _) }
