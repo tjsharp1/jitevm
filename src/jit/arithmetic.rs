@@ -1,12 +1,10 @@
-use super::JitEvmEngineSimpleBlock;
-
 macro_rules! op1_llvmnativei256_iszero {
     ($self:ident, $book:ident, $this:expr, $next:expr, $op:expr, $i:expr) => {{
         // TODO: this can also be optimized...
         let (book, val) = $self.build_stack_pop($book)?;
         let cmp = $self.builder.build_int_compare(
             IntPredicate::EQ,
-            $self.type_stackel.const_int(0, false),
+            $self.types.type_stackel.const_int(0, false),
             val,
             "",
         )?;
@@ -32,12 +30,12 @@ macro_rules! op1_llvmnativei256_iszero {
         push_1.add_incoming(&book, &$this);
 
         $self.builder.position_at_end(push_0.block);
-        let book_0 = $self.build_stack_push(book, $self.type_stackel.const_int(0, false))?;
+        let book_0 = $self.build_stack_push(book, $self.types.type_stackel.const_int(0, false))?;
         $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&book_0, &push_0);
 
         $self.builder.position_at_end(push_1.block);
-        let book_1 = $self.build_stack_push(book, $self.type_stackel.const_int(1, false))?;
+        let book_1 = $self.build_stack_push(book, $self.types.type_stackel.const_int(1, false))?;
         $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&book_1, &push_1);
 
@@ -82,12 +80,12 @@ macro_rules! op2_llvmnativei256_compare_operation {
         push_1.add_incoming(&book, &$this);
 
         $self.builder.position_at_end(push_0.block);
-        let book_0 = $self.build_stack_push(book, $self.type_stackel.const_int(0, false))?;
+        let book_0 = $self.build_stack_push(book, $self.types.type_stackel.const_int(0, false))?;
         $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&book_0, &push_0);
 
         $self.builder.position_at_end(push_1.block);
-        let book_1 = $self.build_stack_push(book, $self.type_stackel.const_int(1, false))?;
+        let book_1 = $self.build_stack_push(book, $self.types.type_stackel.const_int(1, false))?;
         $self.builder.build_unconditional_branch($next.block)?;
         $next.add_incoming(&book_1, &push_1);
 
@@ -97,8 +95,8 @@ macro_rules! op2_llvmnativei256_compare_operation {
 
 macro_rules! op2_i256_exp {
     ($self:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident, loop_bit) => {{
-        let one = $self.type_stackel.const_int(1, false);
-        let zero = $self.type_stackel.const_int(0, false);
+        let one = $self.types.type_stackel.const_int(1, false);
+        let zero = $self.types.type_stackel.const_int(0, false);
 
         let bit = $self.builder.build_and($exp, $mask, "")?;
         let is_zero_bit = $self
@@ -117,8 +115,8 @@ macro_rules! op2_i256_exp {
         let (book, a) = $self.build_stack_pop($book)?;
         let (book, exp) = $self.build_stack_pop(book)?;
 
-        let const_1 = $self.type_stackel.const_int(1, false);
-        let zero = $self.type_stackel.const_int(0, false);
+        let const_1 = $self.types.type_stackel.const_int(1, false);
+        let zero = $self.types.type_stackel.const_int(0, false);
         let is_zero = $self
             .builder
             .build_int_compare(IntPredicate::EQ, exp, zero, "exp_check")?;
@@ -151,20 +149,20 @@ macro_rules! op2_i256_exp {
         $self.builder.position_at_end(else_block.block);
         let else_book = else_block.book();
 
-        let const8 = $self.type_ptrint.const_int(8, false);
-        let const1 = $self.type_ptrint.const_int(1, false);
+        let const8 = $self.types.type_ptrint.const_int(8, false);
+        let const1 = $self.types.type_ptrint.const_int(1, false);
         let msbyte = $self.build_get_msbyte(exp)?;
         let bit = $self.builder.build_int_mul(msbyte, const8, "")?;
         let shift = $self.builder.build_int_sub(bit, const1, "")?;
         let shift_cast = $self
             .builder
-            .build_int_cast(shift, $self.type_stackel, "")?;
+            .build_int_cast(shift, $self.types.type_stackel, "")?;
 
         let mask_init = $self.builder.build_left_shift(const_1, shift_cast, "")?;
 
         let accum_init = $self
             .builder
-            .build_bitcast(const_1, $self.type_stackel, "")?
+            .build_bitcast(const_1, $self.types.type_stackel, "")?
             .into_int_value();
 
         let loop_label = format!("Instruction #{}: Exp / loop", $i);
@@ -186,8 +184,8 @@ macro_rules! op2_i256_exp {
         $self.builder.build_unconditional_branch(loop_block.block)?;
 
         $self.builder.position_at_end(loop_block.block);
-        let mask_phi = $self.builder.build_phi($self.type_stackel, "")?;
-        let accum_phi = $self.builder.build_phi($self.type_stackel, "")?;
+        let mask_phi = $self.builder.build_phi($self.types.type_stackel, "")?;
+        let accum_phi = $self.builder.build_phi($self.types.type_stackel, "")?;
         accum_phi.add_incoming(&[(&accum_init, else_block.block)]);
         mask_phi.add_incoming(&[(&mask_init, else_block.block)]);
         let mut mask = mask_phi.as_basic_value().into_int_value();
@@ -212,7 +210,7 @@ macro_rules! op2_i256_exp {
             .build_conditional_branch(cond, loop_end_block.block, loop_block.block)?;
 
         $self.builder.position_at_end(loop_end_block.block);
-        let final_accum = $self.builder.build_phi($self.type_stackel, "")?;
+        let final_accum = $self.builder.build_phi($self.types.type_stackel, "")?;
         final_accum.add_incoming(&[(&accum, loop_block.block)]);
 
         $self.build_stack_push(loop_end_book, final_accum.as_basic_value().into_int_value())?;

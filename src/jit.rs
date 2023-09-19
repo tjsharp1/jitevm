@@ -1,21 +1,15 @@
 use crate::code::{EvmOp, IndexedEvmCode};
 use crate::constants::*;
-use hex_literal::hex;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
-use inkwell::targets::{ByteOrdering, InitializationConfig, Target};
-use inkwell::types::{IntType, VectorType}; //PointerType};
+use inkwell::targets::{InitializationConfig, Target};
 use inkwell::values::{BasicValue, IntValue, PhiValue, VectorValue}; //PointerValue
 use inkwell::AddressSpace;
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
-use primitive_types::U256;
-use sha3::{Digest, Keccak256};
-use std::convert::From;
-use thiserror::Error;
 
 #[cfg(test)]
 mod test;
@@ -24,15 +18,16 @@ mod test;
 mod arithmetic;
 mod context;
 mod error;
+mod ffi;
+mod types;
+
+use ffi::*;
 
 pub use context::JitEvmExecutionContext;
 use context::JitEvmPtrs;
 pub use error::JitEvmEngineError;
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize) -> u64;
-
-pub const KECCAK_EMPTY: [u8; 32] =
-    hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 
 #[derive(Debug, Copy, Clone)]
 pub struct JitEvmEngineBookkeeping<'ctx> {
@@ -153,16 +148,10 @@ pub struct JitContractBuilder<'ctx> {
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     pub execution_engine: ExecutionEngine<'ctx>,
-    pub type_ptrint: IntType<'ctx>,
-    pub type_stackel: IntType<'ctx>,
-    pub type_retval: IntType<'ctx>,
-    pub type_i8: IntType<'ctx>,
-    pub type_ivec: VectorType<'ctx>,
-    pub type_rvec: VectorType<'ctx>,
-    pub swap_bytes: VectorValue<'ctx>,
+    pub types: types::JitTypes<'ctx>,
     pub debug_ir: Option<String>,
     pub debug_asm: Option<String>,
-    pub is_little_endian: bool,
+    pub host_functions: HostFunctions<'ctx>,
 }
 
 impl<'ctx> JitContractBuilder<'ctx> {
@@ -173,53 +162,18 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let builder = context.create_builder();
         let execution_engine = module.create_jit_execution_engine(OptimizationLevel::Aggressive)?;
 
-        let target_data = execution_engine.get_target_data();
-        let type_ptrint = context.ptr_sized_int_type(&target_data, None); // type for pointers (stack pointer, host interaction)
-                                                                          // ensure consistency btw Rust/LLVM definition of compiled contract function
-        assert_eq!(type_ptrint.get_bit_width(), 64);
-        assert_eq!(usize::BITS, 64);
-        // TODO: the above assumes that pointers address memory byte-wise!
-
-        let type_stackel = context.custom_width_int_type(256); // type for stack elements
-        assert_eq!(type_stackel.get_bit_width(), 256);
-        assert_eq!(
-            type_stackel.get_bit_width() as u64,
-            EVM_STACK_ELEMENT_SIZE * 8
-        );
-
-        let type_retval = context.i64_type(); // type for return value
-                                              // ensure consistency btw Rust/LLVM definition of compiled contract function
-        assert_eq!(type_retval.get_bit_width(), 64);
-        assert_eq!(u64::BITS, 64);
-
-        // vectorized byte swapping
-        let type_i8 = context.i8_type();
-        let type_ivec = type_i8.vec_type(16);
-        let type_rvec = type_i8.vec_type(32);
-        let i32_type = context.i32_type();
-        let values: Vec<_> = (0..32)
-            .rev()
-            .map(|v| i32_type.const_int(v, false))
-            .collect();
-        let swap_bytes = VectorType::const_vector(&values);
-
-        let is_little_endian = target_data.get_byte_ordering() == ByteOrdering::LittleEndian;
+        let types = types::JitTypes::new(&context, &execution_engine);
+        let host_functions = HostFunctions::new(types.clone(), &module, &execution_engine);
 
         Ok(Self {
             context: &context,
             module,
             builder,
             execution_engine,
-            type_ptrint,
-            type_stackel,
-            type_retval,
-            type_i8,
-            type_ivec,
-            type_rvec,
-            swap_bytes,
+            types,
             debug_ir: None,
             debug_asm: None,
-            is_little_endian,
+            host_functions,
         })
     }
 
@@ -235,55 +189,17 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
     //// HELPER FUNCTIONS
 
-    #[allow(dead_code)]
-    fn build_print_u64<'a>(
-        &'a self,
-        val: IntValue<'a>,
-        hex: bool,
-    ) -> Result<(), JitEvmEngineError> {
-        let fun = self
-            .module
-            .get_function("callback_print_u64")
-            .expect("No fun here");
-        let ptr = self.builder.build_alloca(self.type_stackel, "")?;
-
-        let hex = self.context.bool_type().const_int(hex as u64, false);
-        self.builder.build_store(ptr, val)?;
-        self.builder
-            .build_call(fun, &[ptr.into(), hex.into()], "")?;
-        Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn build_print_u256<'a>(
-        &'a self,
-        val: IntValue<'a>,
-        hex: bool,
-    ) -> Result<(), JitEvmEngineError> {
-        let fun = self
-            .module
-            .get_function("callback_print_u256")
-            .expect("No fun here");
-        let ptr = self.builder.build_alloca(self.type_stackel, "")?;
-
-        let hex = self.context.bool_type().const_int(hex as u64, false);
-        self.builder.build_store(ptr, val)?;
-        self.builder
-            .build_call(fun, &[ptr.into(), hex.into()], "")?;
-        Ok(())
-    }
-
     fn build_get_msbyte<'a>(
         &'a self,
         val: IntValue<'a>,
     ) -> Result<IntValue<'a>, JitEvmEngineError> {
-        let byte_count = self.type_stackel.const_int(0, false);
-        let const8 = self.type_stackel.const_int(8, false);
-        let const1 = self.type_stackel.const_int(1, false);
-        let const0 = self.type_stackel.const_int(0, false);
+        let byte_count = self.types.type_stackel.const_int(0, false);
+        let const8 = self.types.type_stackel.const_int(8, false);
+        let const1 = self.types.type_stackel.const_int(1, false);
+        let const0 = self.types.type_stackel.const_int(0, false);
 
-        let bit_width = (self.type_stackel.get_bit_width() / 2) as u64;
-        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let bit_width = (self.types.type_stackel.get_bit_width() / 2) as u64;
+        let shift_width = self.types.type_stackel.const_int(bit_width, false);
         let bytes = self
             .builder
             .build_int_unsigned_div(shift_width, const8, "")?;
@@ -306,7 +222,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             .into_int_value();
         // 16-byte
         let bit_width = bit_width / 2;
-        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let shift_width = self.types.type_stackel.const_int(bit_width, false);
         let bytes = self
             .builder
             .build_int_unsigned_div(shift_width, const8, "")?;
@@ -329,7 +245,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             .into_int_value();
         // 8-byte
         let bit_width = bit_width / 2;
-        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let shift_width = self.types.type_stackel.const_int(bit_width, false);
         let bytes = self
             .builder
             .build_int_unsigned_div(shift_width, const8, "")?;
@@ -352,7 +268,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             .into_int_value();
         // 4-byte
         let bit_width = bit_width / 2;
-        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let shift_width = self.types.type_stackel.const_int(bit_width, false);
         let bytes = self
             .builder
             .build_int_unsigned_div(shift_width, const8, "")?;
@@ -375,7 +291,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             .into_int_value();
         // 2-byte
         let bit_width = bit_width / 2;
-        let shift_width = self.type_stackel.const_int(bit_width, false);
+        let shift_width = self.types.type_stackel.const_int(bit_width, false);
         let bytes = self
             .builder
             .build_int_unsigned_div(shift_width, const8, "")?;
@@ -407,7 +323,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
         let casted = self
             .builder
-            .build_int_cast(byte_count, self.type_ptrint, "")?;
+            .build_int_cast(byte_count, self.types.type_ptrint, "")?;
 
         Ok(casted)
     }
@@ -416,7 +332,10 @@ impl<'ctx> JitContractBuilder<'ctx> {
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
     ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let sp_offset = self
+            .types
+            .type_ptrint
+            .const_int(EVM_STACK_ELEMENT_SIZE, false);
         let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
 
         Ok(book.update_sp(sp))
@@ -427,11 +346,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         book: JitEvmEngineBookkeeping<'a>,
         val: IntValue<'a>,
     ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let sp_offset = self
+            .types
+            .type_ptrint
+            .const_int(EVM_STACK_ELEMENT_SIZE, false);
 
         let sp_ptr = self.builder.build_int_to_ptr(
             book.sp,
-            self.type_stackel.ptr_type(AddressSpace::default()),
+            self.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         self.builder.build_store(sp_ptr, val)?;
@@ -445,11 +367,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         book: JitEvmEngineBookkeeping<'a>,
         val: VectorValue<'a>,
     ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let sp_offset = self
+            .types
+            .type_ptrint
+            .const_int(EVM_STACK_ELEMENT_SIZE, false);
 
         let sp_ptr = self.builder.build_int_to_ptr(
             book.sp,
-            self.type_rvec.ptr_type(AddressSpace::default()),
+            self.types.type_rvec.ptr_type(AddressSpace::default()),
             "",
         )?;
         self.builder.build_store(sp_ptr, val)?;
@@ -462,12 +387,15 @@ impl<'ctx> JitContractBuilder<'ctx> {
         &'a self,
         book: JitEvmEngineBookkeeping<'a>,
     ) -> Result<(JitEvmEngineBookkeeping<'a>, IntValue<'a>), JitEvmEngineError> {
-        let sp_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let sp_offset = self
+            .types
+            .type_ptrint
+            .const_int(EVM_STACK_ELEMENT_SIZE, false);
 
         let sp = self.builder.build_int_sub(book.sp, sp_offset, "")?;
         let sp_ptr = self.builder.build_int_to_ptr(
             sp,
-            self.type_stackel.ptr_type(AddressSpace::default()),
+            self.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         let val = self.builder.build_load(sp_ptr, "")?.into_int_value();
@@ -486,8 +414,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
         ),
         JitEvmEngineError,
     > {
-        let sp0_offset = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let sp0_offset = self
+            .types
+            .type_ptrint
+            .const_int(EVM_STACK_ELEMENT_SIZE, false);
         let sp1_offset = self
+            .types
             .type_ptrint
             .const_int(EVM_JIT_STACK_ALIGN as u64, false);
 
@@ -496,12 +428,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
         let sp0_ptr = self.builder.build_int_to_ptr(
             sp0,
-            self.type_ivec.ptr_type(AddressSpace::default()),
+            self.types.type_ivec.ptr_type(AddressSpace::default()),
             "",
         )?;
         let sp1_ptr = self.builder.build_int_to_ptr(
             sp1,
-            self.type_ivec.ptr_type(AddressSpace::default()),
+            self.types.type_ivec.ptr_type(AddressSpace::default()),
             "",
         )?;
 
@@ -518,13 +450,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         val: IntValue<'a>,
     ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
         let idx = self
+            .types
             .type_ptrint
             .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
 
         let sp_int = self.builder.build_int_sub(book.sp, idx, "")?;
         let sp_ptr = self.builder.build_int_to_ptr(
             sp_int,
-            self.type_stackel.ptr_type(AddressSpace::default()),
+            self.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         self.builder.build_store(sp_ptr, val)?;
@@ -538,13 +471,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         idx: u64,
     ) -> Result<(JitEvmEngineBookkeeping<'a>, IntValue<'a>), JitEvmEngineError> {
         let idx = self
+            .types
             .type_ptrint
             .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
 
         let sp_int = self.builder.build_int_sub(book.sp, idx, "")?;
         let sp_ptr = self.builder.build_int_to_ptr(
             sp_int,
-            self.type_stackel.ptr_type(AddressSpace::default()),
+            self.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         let val = self.builder.build_load(sp_ptr, "")?.into_int_value();
@@ -557,19 +491,23 @@ impl<'ctx> JitContractBuilder<'ctx> {
         book: JitEvmEngineBookkeeping<'a>,
         idx: u64,
     ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let len_stackel = self.type_ptrint.const_int(EVM_STACK_ELEMENT_SIZE, false);
+        let len_stackel = self
+            .types
+            .type_ptrint
+            .const_int(EVM_STACK_ELEMENT_SIZE, false);
         let sp_src_offset = self
+            .types
             .type_ptrint
             .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
         let src_int = self.builder.build_int_sub(book.sp, sp_src_offset, "")?;
         let src_ptr = self.builder.build_int_to_ptr(
             src_int,
-            self.type_stackel.ptr_type(AddressSpace::default()),
+            self.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         let dst_ptr = self.builder.build_int_to_ptr(
             book.sp,
-            self.type_stackel.ptr_type(AddressSpace::default()),
+            self.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         self.builder.build_memcpy(
@@ -597,128 +535,13 @@ impl<'ctx> JitContractBuilder<'ctx> {
         Ok(book)
     }
 
-    // CALLBACKS FOR OPERATIONS THAT CANNOT HAPPEN PURELY WITHIN THE EVM
-
-    pub extern "C" fn callback_sha3(exectx: usize, sp: usize, ptr: usize, size: usize) {
-        let rawptrs = JitEvmPtrs::from_raw(exectx);
-
-        let hash = Keccak256::digest(rawptrs.mem_slice(ptr, size));
-
-        *rawptrs.stack_mut(sp, 0) = U256::from(hash.as_slice());
-    }
-
-    pub extern "C" fn callback_print_u64(ptr: usize, hex: bool) {
-        let item: &u64 = unsafe { &*(ptr as *const _) };
-        if hex {
-            println!("U64 value 0x{:x}", item);
-        } else {
-            println!("U64 value {}", item);
-        }
-    }
-
-    pub extern "C" fn callback_print_u256(ptr: usize, hex: bool) {
-        let item: &U256 = unsafe { &*(ptr as *const _) };
-        if hex {
-            println!("U256 value 0x{:x}", item);
-        } else {
-            println!("U256 value {}", item);
-        }
-    }
-
-    pub extern "C" fn callback_sload(exectx: usize, sp: usize) -> u64 {
-        let rawptrs = JitEvmPtrs::from_raw(exectx);
-
-        let key: &mut U256 = rawptrs.stack_mut(sp, 1);
-
-        match rawptrs.storage_get(key) {
-            Some(value) => {
-                *key = *value;
-            }
-            None => {
-                *key = U256::zero();
-            }
-        }
-
-        0
-    }
-
-    pub extern "C" fn callback_sstore(exectx: usize, sp: usize) -> u64 {
-        let rawptrs = JitEvmPtrs::from_raw(exectx);
-
-        let key: &U256 = rawptrs.stack(sp, 1);
-        let value: &U256 = rawptrs.stack(sp, 2);
-
-        rawptrs.storage_insert(*key, *value);
-
-        0
-    }
-
     pub fn build(self, code: IndexedEvmCode) -> Result<JitEvmContract<'ctx>, JitEvmEngineError> {
-        // CALLBACKS
-        let void_type = self.context.void_type();
-
-        let cb_type = void_type.fn_type(
-            &[self.type_ptrint.into(), self.context.bool_type().into()],
-            false,
-        );
-        let cb_func = self
-            .module
-            .add_function("callback_print_u64", cb_type, None);
-        self.execution_engine
-            .add_global_mapping(&cb_func, JitContractBuilder::callback_print_u64 as usize);
-
-        let cb_type = void_type.fn_type(
-            &[self.type_ptrint.into(), self.context.bool_type().into()],
-            false,
-        );
-        let cb_func = self
-            .module
-            .add_function("callback_print_u256", cb_type, None);
-        self.execution_engine
-            .add_global_mapping(&cb_func, JitContractBuilder::callback_print_u256 as usize);
-
-        let callback_sha3_func = {
-            // SHA3
-            let cb_type = void_type.fn_type(
-                &[
-                    self.type_ptrint.into(),
-                    self.type_ptrint.into(),
-                    self.type_ptrint.into(),
-                    self.type_ptrint.into(),
-                ],
-                false,
-            );
-            let cb_func = self.module.add_function("callback_sha3", cb_type, None);
-            self.execution_engine
-                .add_global_mapping(&cb_func, JitContractBuilder::callback_sha3 as usize);
-            cb_func
-        };
-
-        let callback_sload_func = {
-            // SLOAD
-            let cb_type = self
-                .type_retval
-                .fn_type(&[self.type_ptrint.into(), self.type_ptrint.into()], false);
-            let cb_func = self.module.add_function("callback_sload", cb_type, None);
-            self.execution_engine
-                .add_global_mapping(&cb_func, JitContractBuilder::callback_sload as usize);
-            cb_func
-        };
-
-        let callback_sstore_func = {
-            // SSTORE
-            let cb_type = self
-                .type_retval
-                .fn_type(&[self.type_ptrint.into(), self.type_ptrint.into()], false);
-            let cb_func = self.module.add_function("callback_sstore", cb_type, None);
-            self.execution_engine
-                .add_global_mapping(&cb_func, JitContractBuilder::callback_sstore as usize);
-            cb_func
-        };
-
         // SETUP JIT'ED CONTRACT FUNCTION
 
-        let executecontract_fn_type = self.type_retval.fn_type(&[self.type_ptrint.into()], false);
+        let executecontract_fn_type = self
+            .types
+            .type_retval
+            .fn_type(&[self.types.type_ptrint.into()], false);
         let function = self
             .module
             .add_function("executecontract", executecontract_fn_type, None);
@@ -732,7 +555,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             let execution_context = function.get_nth_param(0).unwrap().into_int_value();
             let execution_context_ptr = self.builder.build_int_to_ptr(
                 execution_context,
-                self.type_ptrint.ptr_type(AddressSpace::default()),
+                self.types.type_ptrint.ptr_type(AddressSpace::default()),
                 "",
             )?;
             let sp_int = self
@@ -742,15 +565,17 @@ impl<'ctx> JitContractBuilder<'ctx> {
             let max_offset = (EVM_STACK_SIZE - 1) as u64 * EVM_STACK_ELEMENT_SIZE;
             let sp_max = self.builder.build_int_add(
                 sp_int,
-                self.type_ptrint.const_int(max_offset, false),
+                self.types.type_ptrint.const_int(max_offset, false),
                 "",
             )?;
-            let mem_offset =
-                self.builder
-                    .build_int_add(execution_context, self.type_ptrint.size_of(), "")?;
+            let mem_offset = self.builder.build_int_add(
+                execution_context,
+                self.types.type_ptrint.size_of(),
+                "",
+            )?;
             let mem_ptr = self.builder.build_int_to_ptr(
                 mem_offset,
-                self.type_ptrint.ptr_type(AddressSpace::default()),
+                self.types.type_ptrint.ptr_type(AddressSpace::default()),
                 "",
             )?;
             let mem = self.builder.build_load(mem_ptr, "")?.into_int_value();
@@ -796,14 +621,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let end =
             JitEvmEngineSimpleBlock::new(&self, instructions[ops_len - 1].block, &"end", &"-end")?;
         self.builder
-            .build_return(Some(&self.type_retval.const_int(0, false)))?;
+            .build_return(Some(&self.types.type_retval.const_int(0, false)))?;
 
         // ERROR-JUMPDEST HANDLER
 
         let error_jumpdest =
             JitEvmEngineSimpleBlock::new(&self, end.block, &"error-jumpdest", &"-error-jumpdest")?;
         self.builder
-            .build_return(Some(&self.type_retval.const_int(1, false)))?;
+            .build_return(Some(&self.types.type_retval.const_int(1, false)))?;
 
         // RENDER INSTRUCTIONS
 
@@ -824,12 +649,15 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
             let book = match op {
                 Stop => {
-                    let val = self.type_retval.const_int(0, false);
+                    let val = self.types.type_retval.const_int(0, false);
                     self.builder.build_return(Some(&val))?;
                     continue; // skip auto-generated jump to next instruction
                 }
                 Push(_, val) => {
-                    let val = self.type_stackel.const_int_arbitrary_precision(&val.0);
+                    let val = self
+                        .types
+                        .type_stackel
+                        .const_int_arbitrary_precision(&val.0);
                     let book = self.build_stack_push(book, val)?;
                     book
                 }
@@ -844,13 +672,15 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
                     let shuffled =
                         self.builder
-                            .build_shuffle_vector(vec0, vec1, self.swap_bytes, "")?;
+                            .build_shuffle_vector(vec0, vec1, self.types.swap_bytes, "")?;
 
-                    let casted = self.builder.build_int_cast(offset, self.type_ptrint, "")?;
+                    let casted = self
+                        .builder
+                        .build_int_cast(offset, self.types.type_ptrint, "")?;
                     let mem = self.builder.build_int_add(book.mem, casted, "")?;
                     let dest_ptr = self.builder.build_int_to_ptr(
                         mem,
-                        self.type_stackel.ptr_type(AddressSpace::default()),
+                        self.types.type_stackel.ptr_type(AddressSpace::default()),
                         "",
                     )?;
 
@@ -863,14 +693,16 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Mstore8 => {
                     let (book, offset) = self.build_stack_pop(book)?;
                     let (book, value) = self.build_stack_pop(book)?;
-                    let value_casted = self.builder.build_int_cast(value, self.type_i8, "")?;
+                    let value_casted =
+                        self.builder.build_int_cast(value, self.types.type_i8, "")?;
                     let offset_casted =
-                        self.builder.build_int_cast(offset, self.type_ptrint, "")?;
+                        self.builder
+                            .build_int_cast(offset, self.types.type_ptrint, "")?;
 
                     let mem = self.builder.build_int_add(book.mem, offset_casted, "")?;
                     let dest_ptr = self.builder.build_int_to_ptr(
                         mem,
-                        self.type_i8.ptr_type(AddressSpace::default()),
+                        self.types.type_i8.ptr_type(AddressSpace::default()),
                         "",
                     )?;
 
@@ -881,22 +713,25 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Mload => {
                     // TODO: memory bounds checks
                     let (book, offset) = self.build_stack_pop(book)?;
-                    let casted = self.builder.build_int_cast(offset, self.type_ptrint, "")?;
+                    let casted = self
+                        .builder
+                        .build_int_cast(offset, self.types.type_ptrint, "")?;
 
                     let mem0 = self.builder.build_int_add(book.mem, casted, "")?;
                     let mem1_offset = self
+                        .types
                         .type_ptrint
                         .const_int(EVM_JIT_STACK_ALIGN as u64, false);
                     let mem1 = self.builder.build_int_add(mem0, mem1_offset, "")?;
 
                     let mem0_ptr = self.builder.build_int_to_ptr(
                         mem0,
-                        self.type_ivec.ptr_type(AddressSpace::default()),
+                        self.types.type_ivec.ptr_type(AddressSpace::default()),
                         "",
                     )?;
                     let mem1_ptr = self.builder.build_int_to_ptr(
                         mem1,
-                        self.type_ivec.ptr_type(AddressSpace::default()),
+                        self.types.type_ivec.ptr_type(AddressSpace::default()),
                         "",
                     )?;
 
@@ -912,58 +747,46 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
                     let shuffled =
                         self.builder
-                            .build_shuffle_vector(vec0, vec1, self.swap_bytes, "")?;
+                            .build_shuffle_vector(vec0, vec1, self.types.swap_bytes, "")?;
 
                     let book = self.build_stack_push_vector(book, shuffled)?;
                     book
                 }
                 Sload => {
-                    let _retval = self
-                        .builder
-                        .build_call(
-                            callback_sload_func,
-                            &[book.execution_context.into(), book.sp.into()],
-                            "",
-                        )?
-                        .try_as_basic_value()
-                        .left()
-                        .ok_or(JitEvmEngineError::NoInstructionValue)?
-                        .into_int_value();
+                    //let _retval = self
+                    //    .builder
+                    //    .build_call(
+                    //        callback_sload_func,
+                    //        &[book.execution_context.into(), book.sp.into()],
+                    //        "",
+                    //    )?
+                    //    .try_as_basic_value()
+                    //    .left()
+                    //    .ok_or(JitEvmEngineError::NoInstructionValue)?
+                    //    .into_int_value();
                     book
                 }
                 Sstore => {
-                    let _retval = self
-                        .builder
-                        .build_call(
-                            callback_sstore_func,
-                            &[book.execution_context.into(), book.sp.into()],
-                            "",
-                        )?
-                        .try_as_basic_value()
-                        .left()
-                        .ok_or(JitEvmEngineError::NoInstructionValue)?
-                        .into_int_value();
-                    let (book, _) = self.build_stack_pop(book)?;
-                    let (book, _) = self.build_stack_pop(book)?;
+                    //let _retval = self
+                    //    .builder
+                    //    .build_call(
+                    //        callback_sstore_func,
+                    //        &[book.execution_context.into(), book.sp.into()],
+                    //        "",
+                    //    )?
+                    //    .try_as_basic_value()
+                    //    .left()
+                    //    .ok_or(JitEvmEngineError::NoInstructionValue)?
+                    //    .into_int_value();
+                    //let (book, _) = self.build_stack_pop(book)?;
+                    //let (book, _) = self.build_stack_pop(book)?;
                     book
                 }
                 Sha3 => {
-                    let (book, offset) = self.build_stack_pop(book)?;
-                    let (book, size) = self.build_stack_pop(book)?;
+                    //let (book, offset) = self.build_stack_pop(book)?;
+                    //let (book, size) = self.build_stack_pop(book)?;
 
-                    let offset = self.builder.build_int_cast(offset, self.type_ptrint, "")?;
-                    let size = self.builder.build_int_cast(size, self.type_ptrint, "")?;
-
-                    self.builder.build_call(
-                        callback_sha3_func,
-                        &[
-                            book.execution_context.into(),
-                            book.sp.into(),
-                            offset.into(),
-                            size.into(),
-                        ],
-                        "",
-                    )?;
+                    //let book = self.host_functions.build_sha3(&self, book, offset, size)?;
 
                     self.build_stack_inc(book)?
                 }
@@ -1005,7 +828,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                             self.builder.position_at_end(jump_table[j].block);
                             let cmp = self.builder.build_int_compare(
                                 IntPredicate::EQ,
-                                self.type_stackel.const_int(jmp_target, false),
+                                self.types.type_stackel.const_int(jmp_target, false),
                                 target,
                                 "",
                             )?;
@@ -1061,7 +884,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                         self.builder.position_at_end(this.block);
                         let cmp = self.builder.build_int_compare(
                             IntPredicate::EQ,
-                            self.type_stackel.const_int(0, false),
+                            self.types.type_stackel.const_int(0, false),
                             val,
                             "",
                         )?;
@@ -1079,7 +902,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                             self.builder.position_at_end(jump_table[j].block);
                             let cmp = self.builder.build_int_compare(
                                 IntPredicate::EQ,
-                                self.type_stackel.const_int(jmp_target, false),
+                                self.types.type_stackel.const_int(jmp_target, false),
                                 target,
                                 "",
                             )?;
@@ -1263,7 +1086,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     let (book, b) = self.build_stack_pop(book)?;
                     let (book, n) = self.build_stack_pop(book)?;
 
-                    let width = self.type_stackel.get_bit_width() * 2;
+                    let width = self.types.type_stackel.get_bit_width() * 2;
                     let type_iup = self.context.custom_width_int_type(width);
 
                     let a_up = self
@@ -1279,7 +1102,9 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     let result = self.builder.build_int_add(a_up, b_up, "")?;
                     let result = self.builder.build_int_unsigned_rem(result, n_up, "")?;
 
-                    let result = self.builder.build_int_cast(result, self.type_stackel, "")?;
+                    let result =
+                        self.builder
+                            .build_int_cast(result, self.types.type_stackel, "")?;
 
                     self.build_stack_push(book, result)?
                 }
@@ -1288,7 +1113,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     let (book, b) = self.build_stack_pop(book)?;
                     let (book, n) = self.build_stack_pop(book)?;
 
-                    let width = self.type_stackel.get_bit_width() * 2;
+                    let width = self.types.type_stackel.get_bit_width() * 2;
                     let type_iup = self.context.custom_width_int_type(width);
 
                     let a_up = self
@@ -1304,14 +1129,16 @@ impl<'ctx> JitContractBuilder<'ctx> {
                     let result = self.builder.build_int_mul(a_up, b_up, "")?;
                     let result = self.builder.build_int_unsigned_rem(result, n_up, "")?;
 
-                    let result = self.builder.build_int_cast(result, self.type_stackel, "")?;
+                    let result =
+                        self.builder
+                            .build_int_cast(result, self.types.type_stackel, "")?;
 
                     self.build_stack_push(book, result)?
                 }
                 Signextend => {
                     let (book, x) = self.build_stack_pop(book)?;
 
-                    let const_32 = self.type_stackel.const_int(32, false);
+                    let const_32 = self.types.type_stackel.const_int(32, false);
                     let cmp = self
                         .builder
                         .build_int_compare(IntPredicate::UGE, x, const_32, "")?;
@@ -1331,9 +1158,9 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
                     let (book, y) = self.build_stack_pop(book)?;
 
-                    let const_1 = self.type_stackel.const_int(1, false);
-                    let const_7 = self.type_stackel.const_int(7, false);
-                    let const_8 = self.type_stackel.const_int(8, false);
+                    let const_1 = self.types.type_stackel.const_int(1, false);
+                    let const_7 = self.types.type_stackel.const_int(7, false);
+                    let const_8 = self.types.type_stackel.const_int(8, false);
 
                     let x_8 = self.builder.build_int_mul(x, const_8, "")?;
                     let bit_index = self.builder.build_int_add(x_8, const_7, "")?;
@@ -1388,7 +1215,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                         // ... and jump to there (conditionally)!
                         let cmp = self.builder.build_int_compare(
                             IntPredicate::EQ,
-                            self.type_stackel.const_int(0, false),
+                            self.types.type_stackel.const_int(0, false),
                             condition,
                             "",
                         )?;
