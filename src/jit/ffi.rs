@@ -1,18 +1,23 @@
 use crate::jit::{
-    error::JitEvmEngineError, types::JitTypes, JitContractBuilder, JitEvmEngineBookkeeping,
-    JitEvmPtrs,
+    error::JitEvmEngineError,
+    stack::{build_stack_inc, build_stack_pop, build_stack_push},
+    types::JitTypes,
+    JitContractBuilder, JitEvmEngineBookkeeping, JitEvmPtrs,
 };
 use hex_literal::hex;
 use inkwell::{
+    builder::Builder,
     context::Context,
     execution_engine::ExecutionEngine,
     module::Module,
     types::{IntType, VoidType},
     values::{FunctionValue, IntValue},
+    AddressSpace,
 };
 use primitive_types::U256;
 use sha3::{Digest, Keccak256};
 
+// TODO: finish with this
 pub const KECCAK_EMPTY: [u8; 32] =
     hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 
@@ -120,17 +125,16 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_sha3(
         &self,
-        c: &JitContractBuilder<'ctx>,
+        builder: &Builder<'ctx>,
         book: JitEvmEngineBookkeeping<'ctx>,
-        offset: IntValue<'ctx>,
-        size: IntValue<'ctx>,
     ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
-        let offset = c
-            .builder
-            .build_int_cast(offset, self.types.type_ptrint, "")?;
-        let size = c.builder.build_int_cast(size, self.types.type_ptrint, "")?;
+        let (book, offset) = build_stack_pop!(self.types, builder, book);
+        let (book, size) = build_stack_pop!(self.types, builder, book);
 
-        c.builder.build_call(
+        let offset = builder.build_int_cast(offset, self.types.type_ptrint, "")?;
+        let size = builder.build_int_cast(size, self.types.type_ptrint, "")?;
+
+        builder.build_call(
             self.callback_sha3_func,
             &[
                 book.execution_context.into(),
@@ -140,6 +144,46 @@ impl<'ctx> HostFunctions<'ctx> {
             ],
             "",
         )?;
+
+        Ok(build_stack_inc!(self.types, builder, book))
+    }
+
+    pub fn build_sload(
+        &self,
+        builder: &Builder<'ctx>,
+        book: JitEvmEngineBookkeeping<'ctx>,
+    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        let _retval = builder
+            .build_call(
+                self.callback_sload_func,
+                &[book.execution_context.into(), book.sp.into()],
+                "",
+            )?
+            .try_as_basic_value()
+            .left()
+            .ok_or(JitEvmEngineError::NoInstructionValue)?
+            .into_int_value();
+
+        Ok(book)
+    }
+
+    pub fn build_sstore(
+        &self,
+        builder: &Builder<'ctx>,
+        book: JitEvmEngineBookkeeping<'ctx>,
+    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        let _retval = builder
+            .build_call(
+                self.callback_sstore_func,
+                &[book.execution_context.into(), book.sp.into()],
+                "",
+            )?
+            .try_as_basic_value()
+            .left()
+            .ok_or(JitEvmEngineError::NoInstructionValue)?
+            .into_int_value();
+        let (book, _) = build_stack_pop!(self.types, builder, book);
+        let (book, _) = build_stack_pop!(self.types, builder, book);
 
         Ok(book)
     }

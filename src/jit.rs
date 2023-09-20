@@ -16,9 +16,13 @@ mod test;
 
 #[macro_use]
 mod arithmetic;
+#[macro_use]
+mod bytes;
 mod context;
 mod error;
 mod ffi;
+#[macro_use]
+mod stack;
 mod types;
 
 use ffi::*;
@@ -57,30 +61,23 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
 
 impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
     pub fn new(
-        engine: &JitContractBuilder<'ctx>,
+        context: &'ctx Context,
+        builder: &Builder<'ctx>,
         block_before: BasicBlock<'ctx>,
         name: &str,
         suffix: &str,
     ) -> Result<Self, JitEvmEngineError> {
-        let i64_type = engine.context.i64_type();
+        // TODO: move this to types
+        let i64_type = context.i64_type();
 
-        let block = engine.context.insert_basic_block_after(block_before, name);
-        engine.builder.position_at_end(block);
-        let phi_execution_context = engine
-            .builder
-            .build_phi(i64_type, &format!("execution_context{}", suffix))?;
-        let phi_sp_min = engine
-            .builder
-            .build_phi(i64_type, &format!("sp_min{}", suffix))?;
-        let phi_sp_max = engine
-            .builder
-            .build_phi(i64_type, &format!("sp_max{}", suffix))?;
-        let phi_sp = engine
-            .builder
-            .build_phi(i64_type, &format!("sp{}", suffix))?;
-        let phi_mem = engine
-            .builder
-            .build_phi(i64_type, &format!("mem{}", suffix))?;
+        let block = context.insert_basic_block_after(block_before, name);
+        builder.position_at_end(block);
+        let phi_execution_context =
+            builder.build_phi(i64_type, &format!("execution_context{}", suffix))?;
+        let phi_sp_min = builder.build_phi(i64_type, &format!("sp_min{}", suffix))?;
+        let phi_sp_max = builder.build_phi(i64_type, &format!("sp_max{}", suffix))?;
+        let phi_sp = builder.build_phi(i64_type, &format!("sp{}", suffix))?;
+        let phi_mem = builder.build_phi(i64_type, &format!("mem{}", suffix))?;
 
         Ok(Self {
             block,
@@ -187,399 +184,54 @@ impl<'ctx> JitContractBuilder<'ctx> {
         self
     }
 
-    //// HELPER FUNCTIONS
-
-    fn build_get_msbyte<'a>(
-        &'a self,
-        val: IntValue<'a>,
-    ) -> Result<IntValue<'a>, JitEvmEngineError> {
-        let byte_count = self.types.type_stackel.const_int(0, false);
-        let const8 = self.types.type_stackel.const_int(8, false);
-        let const1 = self.types.type_stackel.const_int(1, false);
-        let const0 = self.types.type_stackel.const_int(0, false);
-
-        let bit_width = (self.types.type_stackel.get_bit_width() / 2) as u64;
-        let shift_width = self.types.type_stackel.const_int(bit_width, false);
-        let bytes = self
-            .builder
-            .build_int_unsigned_div(shift_width, const8, "")?;
-
-        let word_shifted = self
-            .builder
-            .build_right_shift(val, shift_width, false, "")?;
-        let is_zero = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
-
-        let to_add = self
-            .builder
-            .build_select(is_zero, const0, bytes, "")?
-            .into_int_value();
-        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
-        let val = self
-            .builder
-            .build_select(is_zero, val, word_shifted, "")?
-            .into_int_value();
-        // 16-byte
-        let bit_width = bit_width / 2;
-        let shift_width = self.types.type_stackel.const_int(bit_width, false);
-        let bytes = self
-            .builder
-            .build_int_unsigned_div(shift_width, const8, "")?;
-
-        let word_shifted = self
-            .builder
-            .build_right_shift(val, shift_width, false, "")?;
-        let is_zero = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
-
-        let to_add = self
-            .builder
-            .build_select(is_zero, const0, bytes, "")?
-            .into_int_value();
-        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
-        let val = self
-            .builder
-            .build_select(is_zero, val, word_shifted, "")?
-            .into_int_value();
-        // 8-byte
-        let bit_width = bit_width / 2;
-        let shift_width = self.types.type_stackel.const_int(bit_width, false);
-        let bytes = self
-            .builder
-            .build_int_unsigned_div(shift_width, const8, "")?;
-
-        let word_shifted = self
-            .builder
-            .build_right_shift(val, shift_width, false, "")?;
-        let is_zero = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
-
-        let to_add = self
-            .builder
-            .build_select(is_zero, const0, bytes, "")?
-            .into_int_value();
-        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
-        let val = self
-            .builder
-            .build_select(is_zero, val, word_shifted, "")?
-            .into_int_value();
-        // 4-byte
-        let bit_width = bit_width / 2;
-        let shift_width = self.types.type_stackel.const_int(bit_width, false);
-        let bytes = self
-            .builder
-            .build_int_unsigned_div(shift_width, const8, "")?;
-
-        let word_shifted = self
-            .builder
-            .build_right_shift(val, shift_width, false, "")?;
-        let is_zero = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
-
-        let to_add = self
-            .builder
-            .build_select(is_zero, const0, bytes, "")?
-            .into_int_value();
-        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
-        let val = self
-            .builder
-            .build_select(is_zero, val, word_shifted, "")?
-            .into_int_value();
-        // 2-byte
-        let bit_width = bit_width / 2;
-        let shift_width = self.types.type_stackel.const_int(bit_width, false);
-        let bytes = self
-            .builder
-            .build_int_unsigned_div(shift_width, const8, "")?;
-
-        let word_shifted = self
-            .builder
-            .build_right_shift(val, shift_width, false, "")?;
-        let is_zero = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, word_shifted, const0, "")?;
-
-        let to_add = self
-            .builder
-            .build_select(is_zero, const0, bytes, "")?
-            .into_int_value();
-        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
-        let val = self
-            .builder
-            .build_select(is_zero, val, word_shifted, "")?
-            .into_int_value();
-        // 1-byte
-        let is_zero = self
-            .builder
-            .build_int_compare(IntPredicate::EQ, val, const0, "")?;
-        let to_add = self
-            .builder
-            .build_select(is_zero, const0, const1, "")?
-            .into_int_value();
-        let byte_count = self.builder.build_int_add(byte_count, to_add, "")?;
-        let casted = self
-            .builder
-            .build_int_cast(byte_count, self.types.type_ptrint, "")?;
-
-        Ok(casted)
-    }
-
-    fn build_stack_inc<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-    ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let sp_offset = self
-            .types
-            .type_ptrint
-            .const_int(EVM_STACK_ELEMENT_SIZE, false);
-        let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
-
-        Ok(book.update_sp(sp))
-    }
-
-    fn build_stack_push<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        val: IntValue<'a>,
-    ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let sp_offset = self
-            .types
-            .type_ptrint
-            .const_int(EVM_STACK_ELEMENT_SIZE, false);
-
-        let sp_ptr = self.builder.build_int_to_ptr(
-            book.sp,
-            self.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        self.builder.build_store(sp_ptr, val)?;
-        let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
-
-        Ok(book.update_sp(sp))
-    }
-
-    fn build_stack_push_vector<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        val: VectorValue<'a>,
-    ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let sp_offset = self
-            .types
-            .type_ptrint
-            .const_int(EVM_STACK_ELEMENT_SIZE, false);
-
-        let sp_ptr = self.builder.build_int_to_ptr(
-            book.sp,
-            self.types.type_rvec.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        self.builder.build_store(sp_ptr, val)?;
-        let sp = self.builder.build_int_add(book.sp, sp_offset, "")?;
-
-        Ok(book.update_sp(sp))
-    }
-
-    fn build_stack_pop<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-    ) -> Result<(JitEvmEngineBookkeeping<'a>, IntValue<'a>), JitEvmEngineError> {
-        let sp_offset = self
-            .types
-            .type_ptrint
-            .const_int(EVM_STACK_ELEMENT_SIZE, false);
-
-        let sp = self.builder.build_int_sub(book.sp, sp_offset, "")?;
-        let sp_ptr = self.builder.build_int_to_ptr(
-            sp,
-            self.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        let val = self.builder.build_load(sp_ptr, "")?.into_int_value();
-
-        Ok((book.update_sp(sp), val))
-    }
-
-    fn build_stack_pop_vector<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-    ) -> Result<
-        (
-            JitEvmEngineBookkeeping<'a>,
-            VectorValue<'a>,
-            VectorValue<'a>,
-        ),
-        JitEvmEngineError,
-    > {
-        let sp0_offset = self
-            .types
-            .type_ptrint
-            .const_int(EVM_STACK_ELEMENT_SIZE, false);
-        let sp1_offset = self
-            .types
-            .type_ptrint
-            .const_int(EVM_JIT_STACK_ALIGN as u64, false);
-
-        let sp0 = self.builder.build_int_sub(book.sp, sp0_offset, "")?;
-        let sp1 = self.builder.build_int_sub(book.sp, sp1_offset, "")?;
-
-        let sp0_ptr = self.builder.build_int_to_ptr(
-            sp0,
-            self.types.type_ivec.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        let sp1_ptr = self.builder.build_int_to_ptr(
-            sp1,
-            self.types.type_ivec.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-
-        let vec0 = self.builder.build_load(sp0_ptr, "")?.into_vector_value();
-        let vec1 = self.builder.build_load(sp1_ptr, "")?.into_vector_value();
-
-        Ok((book.update_sp(sp0), vec0, vec1))
-    }
-
-    fn build_stack_write<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        idx: u64,
-        val: IntValue<'a>,
-    ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let idx = self
-            .types
-            .type_ptrint
-            .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
-
-        let sp_int = self.builder.build_int_sub(book.sp, idx, "")?;
-        let sp_ptr = self.builder.build_int_to_ptr(
-            sp_int,
-            self.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        self.builder.build_store(sp_ptr, val)?;
-
-        Ok(book)
-    }
-
-    fn build_stack_read<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        idx: u64,
-    ) -> Result<(JitEvmEngineBookkeeping<'a>, IntValue<'a>), JitEvmEngineError> {
-        let idx = self
-            .types
-            .type_ptrint
-            .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
-
-        let sp_int = self.builder.build_int_sub(book.sp, idx, "")?;
-        let sp_ptr = self.builder.build_int_to_ptr(
-            sp_int,
-            self.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        let val = self.builder.build_load(sp_ptr, "")?.into_int_value();
-
-        Ok((book, val))
-    }
-
-    fn build_dup<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        idx: u64,
-    ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let len_stackel = self
-            .types
-            .type_ptrint
-            .const_int(EVM_STACK_ELEMENT_SIZE, false);
-        let sp_src_offset = self
-            .types
-            .type_ptrint
-            .const_int(idx * EVM_STACK_ELEMENT_SIZE, false);
-        let src_int = self.builder.build_int_sub(book.sp, sp_src_offset, "")?;
-        let src_ptr = self.builder.build_int_to_ptr(
-            src_int,
-            self.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        let dst_ptr = self.builder.build_int_to_ptr(
-            book.sp,
-            self.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        self.builder.build_memcpy(
-            dst_ptr,
-            EVM_JIT_STACK_ALIGN,
-            src_ptr,
-            EVM_JIT_STACK_ALIGN,
-            len_stackel,
-        )?;
-        let sp = self.builder.build_int_add(book.sp, len_stackel, "")?;
-        let book = book.update_sp(sp);
-
-        Ok(book)
-    }
-
-    fn build_swap<'a>(
-        &'a self,
-        book: JitEvmEngineBookkeeping<'a>,
-        idx: u64,
-    ) -> Result<JitEvmEngineBookkeeping<'a>, JitEvmEngineError> {
-        let (book, a) = self.build_stack_read(book, 1)?;
-        let (book, b) = self.build_stack_read(book, idx)?;
-        let book = self.build_stack_write(book, 1, b)?;
-        let book = self.build_stack_write(book, idx, a)?;
-        Ok(book)
-    }
-
     pub fn build(self, code: IndexedEvmCode) -> Result<JitEvmContract<'ctx>, JitEvmEngineError> {
+        let JitContractBuilder {
+            context,
+            module,
+            builder,
+            execution_engine,
+            types,
+            debug_ir,
+            debug_asm,
+            host_functions,
+        } = self;
+
         // SETUP JIT'ED CONTRACT FUNCTION
 
-        let executecontract_fn_type = self
-            .types
+        let executecontract_fn_type = types
             .type_retval
-            .fn_type(&[self.types.type_ptrint.into()], false);
-        let function = self
-            .module
-            .add_function("executecontract", executecontract_fn_type, None);
+            .fn_type(&[types.type_ptrint.into()], false);
+        let function = module.add_function("executecontract", executecontract_fn_type, None);
 
         // SETUP HANDLER
 
-        let setup_block = self.context.append_basic_block(function, "setup");
-        self.builder.position_at_end(setup_block);
+        let setup_block = context.append_basic_block(function, "setup");
+        builder.position_at_end(setup_block);
 
         let setup_book = {
             let execution_context = function.get_nth_param(0).unwrap().into_int_value();
-            let execution_context_ptr = self.builder.build_int_to_ptr(
+            let execution_context_ptr = builder.build_int_to_ptr(
                 execution_context,
-                self.types.type_ptrint.ptr_type(AddressSpace::default()),
+                types.type_ptrint.ptr_type(AddressSpace::default()),
                 "",
             )?;
-            let sp_int = self
-                .builder
+            let sp_int = builder
                 .build_load(execution_context_ptr, "")?
                 .into_int_value();
             let max_offset = (EVM_STACK_SIZE - 1) as u64 * EVM_STACK_ELEMENT_SIZE;
-            let sp_max = self.builder.build_int_add(
+            let sp_max = builder.build_int_add(
                 sp_int,
-                self.types.type_ptrint.const_int(max_offset, false),
+                types.type_ptrint.const_int(max_offset, false),
                 "",
             )?;
-            let mem_offset = self.builder.build_int_add(
-                execution_context,
-                self.types.type_ptrint.size_of(),
-                "",
-            )?;
-            let mem_ptr = self.builder.build_int_to_ptr(
+            let mem_offset =
+                builder.build_int_add(execution_context, types.type_ptrint.size_of(), "")?;
+            let mem_ptr = builder.build_int_to_ptr(
                 mem_offset,
-                self.types.type_ptrint.ptr_type(AddressSpace::default()),
+                types.type_ptrint.ptr_type(AddressSpace::default()),
                 "",
             )?;
-            let mem = self.builder.build_load(mem_ptr, "")?.into_int_value();
-            // let retval = self.type_retval.const_int(0, false);
+            let mem = builder.build_load(mem_ptr, "")?.into_int_value();
             JitEvmEngineBookkeeping {
                 execution_context: execution_context,
                 sp_min: sp_int,
@@ -604,31 +256,39 @@ impl<'ctx> JitContractBuilder<'ctx> {
             };
             let label = format!("Instruction #{}: {:?}", i, code.code.ops[i]);
             instructions.push(JitEvmEngineSimpleBlock::new(
-                &self,
+                &context,
+                &builder,
                 block_before,
                 &label,
                 &format!("_{}", i),
             )?);
         }
 
-        self.builder.position_at_end(setup_block);
-        self.builder
-            .build_unconditional_branch(instructions[0].block)?;
+        builder.position_at_end(setup_block);
+        builder.build_unconditional_branch(instructions[0].block)?;
         instructions[0].phi_setup_block(&setup_book, &setup_block);
 
         // END HANDLER
 
-        let end =
-            JitEvmEngineSimpleBlock::new(&self, instructions[ops_len - 1].block, &"end", &"-end")?;
-        self.builder
-            .build_return(Some(&self.types.type_retval.const_int(0, false)))?;
+        let end = JitEvmEngineSimpleBlock::new(
+            &context,
+            &builder,
+            instructions[ops_len - 1].block,
+            &"end",
+            &"-end",
+        )?;
+        builder.build_return(Some(&types.type_retval.const_int(0, false)))?;
 
         // ERROR-JUMPDEST HANDLER
 
-        let error_jumpdest =
-            JitEvmEngineSimpleBlock::new(&self, end.block, &"error-jumpdest", &"-error-jumpdest")?;
-        self.builder
-            .build_return(Some(&self.types.type_retval.const_int(1, false)))?;
+        let error_jumpdest = JitEvmEngineSimpleBlock::new(
+            &context,
+            &builder,
+            end.block,
+            &"error-jumpdest",
+            &"-error-jumpdest",
+        )?;
+        builder.build_return(Some(&types.type_retval.const_int(1, false)))?;
 
         // RENDER INSTRUCTIONS
 
@@ -637,7 +297,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
             let this = instructions[i];
 
-            self.builder.position_at_end(this.block);
+            builder.position_at_end(this.block);
 
             let book = this.book();
 
@@ -649,94 +309,80 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
             let book = match op {
                 Stop => {
-                    let val = self.types.type_retval.const_int(0, false);
-                    self.builder.build_return(Some(&val))?;
+                    let val = types.type_retval.const_int(0, false);
+                    builder.build_return(Some(&val))?;
                     continue; // skip auto-generated jump to next instruction
                 }
                 Push(_, val) => {
-                    let val = self
-                        .types
-                        .type_stackel
-                        .const_int_arbitrary_precision(&val.0);
-                    let book = self.build_stack_push(book, val)?;
+                    let val = types.type_stackel.const_int_arbitrary_precision(&val.0);
+                    let book = build_stack_push!(types, builder, book, val);
                     book
                 }
                 Pop => {
-                    let (book, _) = self.build_stack_pop(book)?;
+                    let (book, _) = build_stack_pop!(types, builder, book);
                     book
                 }
                 Jumpdest => book,
                 Mstore => {
-                    let (book, offset) = self.build_stack_pop(book)?;
-                    let (book, vec0, vec1) = self.build_stack_pop_vector(book)?;
+                    let (book, offset) = build_stack_pop!(types, builder, book);
+                    let (book, vec0, vec1) = build_stack_pop_vector!(types, builder, book);
 
                     let shuffled =
-                        self.builder
-                            .build_shuffle_vector(vec0, vec1, self.types.swap_bytes, "")?;
+                        builder.build_shuffle_vector(vec0, vec1, types.swap_bytes, "")?;
 
-                    let casted = self
-                        .builder
-                        .build_int_cast(offset, self.types.type_ptrint, "")?;
-                    let mem = self.builder.build_int_add(book.mem, casted, "")?;
-                    let dest_ptr = self.builder.build_int_to_ptr(
+                    let casted = builder.build_int_cast(offset, types.type_ptrint, "")?;
+                    let mem = builder.build_int_add(book.mem, casted, "")?;
+                    let dest_ptr = builder.build_int_to_ptr(
                         mem,
-                        self.types.type_stackel.ptr_type(AddressSpace::default()),
+                        types.type_stackel.ptr_type(AddressSpace::default()),
                         "",
                     )?;
 
-                    self.builder
-                        .build_store(dest_ptr, shuffled)?
-                        .set_alignment(1)?;
+                    builder.build_store(dest_ptr, shuffled)?.set_alignment(1)?;
 
                     book
                 }
                 Mstore8 => {
-                    let (book, offset) = self.build_stack_pop(book)?;
-                    let (book, value) = self.build_stack_pop(book)?;
-                    let value_casted =
-                        self.builder.build_int_cast(value, self.types.type_i8, "")?;
-                    let offset_casted =
-                        self.builder
-                            .build_int_cast(offset, self.types.type_ptrint, "")?;
+                    let (book, offset) = build_stack_pop!(types, builder, book);
+                    let (book, value) = build_stack_pop!(types, builder, book);
+                    let value_casted = builder.build_int_cast(value, types.type_i8, "")?;
+                    let offset_casted = builder.build_int_cast(offset, types.type_ptrint, "")?;
 
-                    let mem = self.builder.build_int_add(book.mem, offset_casted, "")?;
-                    let dest_ptr = self.builder.build_int_to_ptr(
+                    let mem = builder.build_int_add(book.mem, offset_casted, "")?;
+                    let dest_ptr = builder.build_int_to_ptr(
                         mem,
-                        self.types.type_i8.ptr_type(AddressSpace::default()),
+                        types.type_i8.ptr_type(AddressSpace::default()),
                         "",
                     )?;
 
-                    self.builder.build_store(dest_ptr, value_casted)?;
+                    builder.build_store(dest_ptr, value_casted)?;
 
                     book
                 }
                 Mload => {
                     // TODO: memory bounds checks
-                    let (book, offset) = self.build_stack_pop(book)?;
-                    let casted = self
-                        .builder
-                        .build_int_cast(offset, self.types.type_ptrint, "")?;
+                    let (book, offset) = build_stack_pop!(types, builder, book);
+                    let casted = builder.build_int_cast(offset, types.type_ptrint, "")?;
 
-                    let mem0 = self.builder.build_int_add(book.mem, casted, "")?;
-                    let mem1_offset = self
-                        .types
+                    let mem0 = builder.build_int_add(book.mem, casted, "")?;
+                    let mem1_offset = types
                         .type_ptrint
                         .const_int(EVM_JIT_STACK_ALIGN as u64, false);
-                    let mem1 = self.builder.build_int_add(mem0, mem1_offset, "")?;
+                    let mem1 = builder.build_int_add(mem0, mem1_offset, "")?;
 
-                    let mem0_ptr = self.builder.build_int_to_ptr(
+                    let mem0_ptr = builder.build_int_to_ptr(
                         mem0,
-                        self.types.type_ivec.ptr_type(AddressSpace::default()),
+                        types.type_ivec.ptr_type(AddressSpace::default()),
                         "",
                     )?;
-                    let mem1_ptr = self.builder.build_int_to_ptr(
+                    let mem1_ptr = builder.build_int_to_ptr(
                         mem1,
-                        self.types.type_ivec.ptr_type(AddressSpace::default()),
+                        types.type_ivec.ptr_type(AddressSpace::default()),
                         "",
                     )?;
 
-                    let vec0 = self.builder.build_load(mem0_ptr, "")?.into_vector_value();
-                    let vec1 = self.builder.build_load(mem1_ptr, "")?.into_vector_value();
+                    let vec0 = builder.build_load(mem0_ptr, "")?.into_vector_value();
+                    let vec1 = builder.build_load(mem1_ptr, "")?.into_vector_value();
 
                     vec0.as_instruction_value()
                         .ok_or(JitEvmEngineError::NoInstructionValue)?
@@ -746,480 +392,379 @@ impl<'ctx> JitContractBuilder<'ctx> {
                         .set_alignment(1)?;
 
                     let shuffled =
-                        self.builder
-                            .build_shuffle_vector(vec0, vec1, self.types.swap_bytes, "")?;
+                        builder.build_shuffle_vector(vec0, vec1, types.swap_bytes, "")?;
 
-                    let book = self.build_stack_push_vector(book, shuffled)?;
+                    let book = build_stack_push_vector!(types, builder, book, shuffled);
                     book
                 }
-                Sload => {
-                    //let _retval = self
-                    //    .builder
-                    //    .build_call(
-                    //        callback_sload_func,
-                    //        &[book.execution_context.into(), book.sp.into()],
-                    //        "",
-                    //    )?
-                    //    .try_as_basic_value()
-                    //    .left()
-                    //    .ok_or(JitEvmEngineError::NoInstructionValue)?
-                    //    .into_int_value();
-                    book
-                }
-                Sstore => {
-                    //let _retval = self
-                    //    .builder
-                    //    .build_call(
-                    //        callback_sstore_func,
-                    //        &[book.execution_context.into(), book.sp.into()],
-                    //        "",
-                    //    )?
-                    //    .try_as_basic_value()
-                    //    .left()
-                    //    .ok_or(JitEvmEngineError::NoInstructionValue)?
-                    //    .into_int_value();
-                    //let (book, _) = self.build_stack_pop(book)?;
-                    //let (book, _) = self.build_stack_pop(book)?;
-                    book
-                }
-                Sha3 => {
-                    //let (book, offset) = self.build_stack_pop(book)?;
-                    //let (book, size) = self.build_stack_pop(book)?;
+                Sload => host_functions.build_sload(&builder, book)?,
+                Sstore => host_functions.build_sstore(&builder, book)?,
+                Sha3 => host_functions.build_sha3(&builder, book)?,
+                //Jump => {
+                //    let (book, target) = self.build_stack_pop(book)?;
 
-                    //let book = self.host_functions.build_sha3(&self, book, offset, size)?;
+                //    if code.jumpdests.is_empty() {
+                //        // there are no valid jump targets, this Jump has to fail!
+                //        // TODO: should this be the error block?
+                //        self.builder.build_unconditional_branch(end.block)?;
+                //        end.add_incoming(&book, &this);
+                //    } else {
+                //        let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
+                //        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
+                //            let jmp_target = code.opidx2target[jmp_i];
+                //            jump_table.push(JitEvmEngineSimpleBlock::new(
+                //                &self,
+                //                if j == 0 {
+                //                    this.block
+                //                } else {
+                //                    jump_table[j - 1].block
+                //                },
+                //                &format!(
+                //                    "instruction #{}: {:?} / to Jumpdest #{} at op #{} to byte #{}",
+                //                    i, op, j, jmp_i, jmp_target
+                //                ),
+                //                &format!("_{}_{}", i, j),
+                //            )?);
+                //        }
 
-                    self.build_stack_inc(book)?
-                }
-                Jump => {
-                    let (book, target) = self.build_stack_pop(book)?;
+                //        self.builder.position_at_end(this.block);
+                //        self.builder
+                //            .build_unconditional_branch(jump_table[0].block)?;
+                //        jump_table[0].add_incoming(&book, &this);
 
-                    if code.jumpdests.is_empty() {
-                        // there are no valid jump targets, this Jump has to fail!
-                        // TODO: should this be the error block?
-                        self.builder.build_unconditional_branch(end.block)?;
-                        end.add_incoming(&book, &this);
-                    } else {
-                        let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
-                        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-                            let jmp_target = code.opidx2target[jmp_i];
-                            jump_table.push(JitEvmEngineSimpleBlock::new(
-                                &self,
-                                if j == 0 {
-                                    this.block
-                                } else {
-                                    jump_table[j - 1].block
-                                },
-                                &format!(
-                                    "instruction #{}: {:?} / to Jumpdest #{} at op #{} to byte #{}",
-                                    i, op, j, jmp_i, jmp_target
-                                ),
-                                &format!("_{}_{}", i, j),
-                            )?);
-                        }
+                //        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
+                //            let jmp_target = code.opidx2target[jmp_i];
+                //            let jmp_target = jmp_target.as_u64(); // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
+                //            self.builder.position_at_end(jump_table[j].block);
+                //            let cmp = self.builder.build_int_compare(
+                //                IntPredicate::EQ,
+                //                self.types.type_stackel.const_int(jmp_target, false),
+                //                target,
+                //                "",
+                //            )?;
+                //            if j + 1 == code.jumpdests.len() {
+                //                self.builder.build_conditional_branch(
+                //                    cmp,
+                //                    instructions[*jmp_i].block,
+                //                    error_jumpdest.block,
+                //                )?;
+                //                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
+                //                error_jumpdest.add_incoming(&book, &jump_table[j]);
+                //            } else {
+                //                self.builder.build_conditional_branch(
+                //                    cmp,
+                //                    instructions[*jmp_i].block,
+                //                    jump_table[j + 1].block,
+                //                )?;
+                //                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
+                //                jump_table[j + 1].add_incoming(&book, &jump_table[j]);
+                //            }
+                //        }
+                //    }
 
-                        self.builder.position_at_end(this.block);
-                        self.builder
-                            .build_unconditional_branch(jump_table[0].block)?;
-                        jump_table[0].add_incoming(&book, &this);
+                //    continue; // skip auto-generated jump to next instruction
+                //}
+                //Jumpi => {
+                //    let (book, target) = self.build_stack_pop(book)?;
+                //    let (book, val) = self.build_stack_pop(book)?;
 
-                        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-                            let jmp_target = code.opidx2target[jmp_i];
-                            let jmp_target = jmp_target.as_u64(); // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
-                            self.builder.position_at_end(jump_table[j].block);
-                            let cmp = self.builder.build_int_compare(
-                                IntPredicate::EQ,
-                                self.types.type_stackel.const_int(jmp_target, false),
-                                target,
-                                "",
-                            )?;
-                            if j + 1 == code.jumpdests.len() {
-                                self.builder.build_conditional_branch(
-                                    cmp,
-                                    instructions[*jmp_i].block,
-                                    error_jumpdest.block,
-                                )?;
-                                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                                error_jumpdest.add_incoming(&book, &jump_table[j]);
-                            } else {
-                                self.builder.build_conditional_branch(
-                                    cmp,
-                                    instructions[*jmp_i].block,
-                                    jump_table[j + 1].block,
-                                )?;
-                                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                                jump_table[j + 1].add_incoming(&book, &jump_table[j]);
-                            }
-                        }
-                    }
+                //    if code.jumpdests.is_empty() {
+                //        // there are no valid jump targets, this Jumpi has to fail!
+                //        self.builder.build_unconditional_branch(end.block)?;
+                //        end.add_incoming(&book, &this);
+                //    } else {
+                //        let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
+                //        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
+                //            let jmp_target = code.opidx2target[jmp_i];
+                //            jump_table.push(JitEvmEngineSimpleBlock::new(
+                //                &self,
+                //                if j == 0 {
+                //                    this.block
+                //                } else {
+                //                    jump_table[j - 1].block
+                //                },
+                //                &format!(
+                //                    "instruction #{}: {:?} / to Jumpdest #{} at op #{} to byte #{}",
+                //                    i, op, j, jmp_i, jmp_target
+                //                ),
+                //                &format!("_{}_{}", i, j),
+                //            )?);
+                //        }
 
-                    continue; // skip auto-generated jump to next instruction
-                }
-                Jumpi => {
-                    let (book, target) = self.build_stack_pop(book)?;
-                    let (book, val) = self.build_stack_pop(book)?;
+                //        self.builder.position_at_end(this.block);
+                //        let cmp = self.builder.build_int_compare(
+                //            IntPredicate::EQ,
+                //            self.types.type_stackel.const_int(0, false),
+                //            val,
+                //            "",
+                //        )?;
+                //        self.builder.build_conditional_branch(
+                //            cmp,
+                //            next.block,
+                //            jump_table[0].block,
+                //        )?;
+                //        next.add_incoming(&book, &this);
+                //        jump_table[0].add_incoming(&book, &this);
 
-                    if code.jumpdests.is_empty() {
-                        // there are no valid jump targets, this Jumpi has to fail!
-                        self.builder.build_unconditional_branch(end.block)?;
-                        end.add_incoming(&book, &this);
-                    } else {
-                        let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
-                        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-                            let jmp_target = code.opidx2target[jmp_i];
-                            jump_table.push(JitEvmEngineSimpleBlock::new(
-                                &self,
-                                if j == 0 {
-                                    this.block
-                                } else {
-                                    jump_table[j - 1].block
-                                },
-                                &format!(
-                                    "instruction #{}: {:?} / to Jumpdest #{} at op #{} to byte #{}",
-                                    i, op, j, jmp_i, jmp_target
-                                ),
-                                &format!("_{}_{}", i, j),
-                            )?);
-                        }
+                //        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
+                //            let jmp_target = code.opidx2target[jmp_i];
+                //            let jmp_target = jmp_target.as_u64(); // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
+                //            self.builder.position_at_end(jump_table[j].block);
+                //            let cmp = self.builder.build_int_compare(
+                //                IntPredicate::EQ,
+                //                self.types.type_stackel.const_int(jmp_target, false),
+                //                target,
+                //                "",
+                //            )?;
+                //            if j + 1 == code.jumpdests.len() {
+                //                self.builder.build_conditional_branch(
+                //                    cmp,
+                //                    instructions[*jmp_i].block,
+                //                    error_jumpdest.block,
+                //                )?;
+                //                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
+                //                error_jumpdest.add_incoming(&book, &jump_table[j]);
+                //            } else {
+                //                self.builder.build_conditional_branch(
+                //                    cmp,
+                //                    instructions[*jmp_i].block,
+                //                    jump_table[j + 1].block,
+                //                )?;
+                //                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
+                //                jump_table[j + 1].add_incoming(&book, &jump_table[j]);
+                //            }
+                //        }
+                //    }
 
-                        self.builder.position_at_end(this.block);
-                        let cmp = self.builder.build_int_compare(
-                            IntPredicate::EQ,
-                            self.types.type_stackel.const_int(0, false),
-                            val,
-                            "",
-                        )?;
-                        self.builder.build_conditional_branch(
-                            cmp,
-                            next.block,
-                            jump_table[0].block,
-                        )?;
-                        next.add_incoming(&book, &this);
-                        jump_table[0].add_incoming(&book, &this);
-
-                        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-                            let jmp_target = code.opidx2target[jmp_i];
-                            let jmp_target = jmp_target.as_u64(); // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
-                            self.builder.position_at_end(jump_table[j].block);
-                            let cmp = self.builder.build_int_compare(
-                                IntPredicate::EQ,
-                                self.types.type_stackel.const_int(jmp_target, false),
-                                target,
-                                "",
-                            )?;
-                            if j + 1 == code.jumpdests.len() {
-                                self.builder.build_conditional_branch(
-                                    cmp,
-                                    instructions[*jmp_i].block,
-                                    error_jumpdest.block,
-                                )?;
-                                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                                error_jumpdest.add_incoming(&book, &jump_table[j]);
-                            } else {
-                                self.builder.build_conditional_branch(
-                                    cmp,
-                                    instructions[*jmp_i].block,
-                                    jump_table[j + 1].block,
-                                )?;
-                                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                                jump_table[j + 1].add_incoming(&book, &jump_table[j]);
-                            }
-                        }
-                    }
-
-                    continue; // skip auto-generated jump to next instruction
-                }
-                Swap1 => self.build_swap(book, 1 + 1)?,
-                Swap2 => self.build_swap(book, 2 + 1)?,
-                Swap3 => self.build_swap(book, 3 + 1)?,
-                Swap4 => self.build_swap(book, 4 + 1)?,
-                Swap5 => self.build_swap(book, 5 + 1)?,
-                Swap6 => self.build_swap(book, 6 + 1)?,
-                Swap7 => self.build_swap(book, 7 + 1)?,
-                Swap8 => self.build_swap(book, 8 + 1)?,
-                Swap9 => self.build_swap(book, 9 + 1)?,
-                Swap10 => self.build_swap(book, 10 + 1)?,
-                Swap11 => self.build_swap(book, 11 + 1)?,
-                Swap12 => self.build_swap(book, 12 + 1)?,
-                Swap13 => self.build_swap(book, 13 + 1)?,
-                Swap14 => self.build_swap(book, 14 + 1)?,
-                Swap15 => self.build_swap(book, 15 + 1)?,
-                Swap16 => self.build_swap(book, 16 + 1)?,
-                Dup1 => self.build_dup(book, 1)?,
-                Dup2 => self.build_dup(book, 2)?,
-                Dup3 => self.build_dup(book, 3)?,
-                Dup4 => self.build_dup(book, 4)?,
-                Dup5 => self.build_dup(book, 5)?,
-                Dup6 => self.build_dup(book, 6)?,
-                Dup7 => self.build_dup(book, 7)?,
-                Dup8 => self.build_dup(book, 8)?,
-                Dup9 => self.build_dup(book, 9)?,
-                Dup10 => self.build_dup(book, 10)?,
-                Dup11 => self.build_dup(book, 11)?,
-                Dup12 => self.build_dup(book, 12)?,
-                Dup13 => self.build_dup(book, 13)?,
-                Dup14 => self.build_dup(book, 14)?,
-                Dup15 => self.build_dup(book, 15)?,
-                Dup16 => self.build_dup(book, 16)?,
+                //    continue; // skip auto-generated jump to next instruction
+                //}
+                Swap1 => build_stack_swap!(types, builder, book, 1 + 1),
+                Swap2 => build_stack_swap!(types, builder, book, 2 + 1),
+                Swap3 => build_stack_swap!(types, builder, book, 3 + 1),
+                Swap4 => build_stack_swap!(types, builder, book, 4 + 1),
+                Swap5 => build_stack_swap!(types, builder, book, 5 + 1),
+                Swap6 => build_stack_swap!(types, builder, book, 6 + 1),
+                Swap7 => build_stack_swap!(types, builder, book, 7 + 1),
+                Swap8 => build_stack_swap!(types, builder, book, 8 + 1),
+                Swap9 => build_stack_swap!(types, builder, book, 9 + 1),
+                Swap10 => build_stack_swap!(types, builder, book, 10 + 1),
+                Swap11 => build_stack_swap!(types, builder, book, 11 + 1),
+                Swap12 => build_stack_swap!(types, builder, book, 12 + 1),
+                Swap13 => build_stack_swap!(types, builder, book, 13 + 1),
+                Swap14 => build_stack_swap!(types, builder, book, 14 + 1),
+                Swap15 => build_stack_swap!(types, builder, book, 15 + 1),
+                Swap16 => build_stack_swap!(types, builder, book, 16 + 1),
+                Dup1 => build_dup!(types, builder, book, 1),
+                Dup2 => build_dup!(types, builder, book, 2),
+                Dup3 => build_dup!(types, builder, book, 3),
+                Dup4 => build_dup!(types, builder, book, 4),
+                Dup5 => build_dup!(types, builder, book, 5),
+                Dup6 => build_dup!(types, builder, book, 6),
+                Dup7 => build_dup!(types, builder, book, 7),
+                Dup8 => build_dup!(types, builder, book, 8),
+                Dup9 => build_dup!(types, builder, book, 9),
+                Dup10 => build_dup!(types, builder, book, 10),
+                Dup11 => build_dup!(types, builder, book, 11),
+                Dup12 => build_dup!(types, builder, book, 12),
+                Dup13 => build_dup!(types, builder, book, 13),
+                Dup14 => build_dup!(types, builder, book, 14),
+                Dup15 => build_dup!(types, builder, book, 15),
+                Dup16 => build_dup!(types, builder, book, 16),
                 Iszero => {
-                    op1_llvmnativei256_iszero!(self, book, this, next, op, i)
+                    op1_llvmnativei256_iszero!(context, types, builder, book, this, next, op, i)
                 }
-                Add => {
-                    op2_llvmnativei256_operation!(self, book, build_int_add)
-                }
-                Sub => {
-                    op2_llvmnativei256_operation!(self, book, build_int_sub)
-                }
-                Mul => {
-                    op2_llvmnativei256_operation!(self, book, build_int_mul)
-                }
-                Div => {
-                    op2_llvmnativei256_operation!(self, book, build_int_unsigned_div)
-                }
-                Sdiv => {
-                    op2_llvmnativei256_operation!(self, book, build_int_signed_div)
-                }
-                Mod => {
-                    op2_llvmnativei256_operation!(self, book, build_int_unsigned_rem)
-                }
-                Smod => {
-                    op2_llvmnativei256_operation!(self, book, build_int_signed_rem)
-                }
-                Shl => {
-                    let (book, r) = self.build_stack_pop(book)?;
-                    let (book, l) = self.build_stack_pop(book)?;
-                    let d = self.builder.build_left_shift(l, r, "")?;
-                    let book = self.build_stack_push(book, d)?;
-                    book
-                }
-                Shr => {
-                    let (book, r) = self.build_stack_pop(book)?;
-                    let (book, l) = self.build_stack_pop(book)?;
-                    let d = self.builder.build_right_shift(l, r, false, "")?;
-                    let book = self.build_stack_push(book, d)?;
-                    book
-                }
-                Sar => {
-                    let (book, r) = self.build_stack_pop(book)?;
-                    let (book, l) = self.build_stack_pop(book)?;
-                    let d = self.builder.build_right_shift(l, r, true, "")?;
-                    let book = self.build_stack_push(book, d)?;
-                    book
-                }
-                Exp => {
-                    op2_i256_exp!(self, book, this, next, i);
-                    continue;
-                }
-                Eq => {
-                    op2_llvmnativei256_compare_operation!(
-                        self,
-                        book,
-                        this,
-                        next,
-                        instructions,
-                        i,
-                        op,
-                        IntPredicate::EQ
-                    )
-                }
-                Lt => {
-                    op2_llvmnativei256_compare_operation!(
-                        self,
-                        book,
-                        this,
-                        next,
-                        instructions,
-                        i,
-                        op,
-                        IntPredicate::ULT
-                    )
-                }
-                Gt => {
-                    op2_llvmnativei256_compare_operation!(
-                        self,
-                        book,
-                        this,
-                        next,
-                        instructions,
-                        i,
-                        op,
-                        IntPredicate::UGT
-                    )
-                }
-                Slt => {
-                    op2_llvmnativei256_compare_operation!(
-                        self,
-                        book,
-                        this,
-                        next,
-                        instructions,
-                        i,
-                        op,
-                        IntPredicate::SLT
-                    )
-                }
-                Sgt => {
-                    op2_llvmnativei256_compare_operation!(
-                        self,
-                        book,
-                        this,
-                        next,
-                        instructions,
-                        i,
-                        op,
-                        IntPredicate::SGT
-                    )
-                }
-                And => {
-                    op2_llvmnativei256_operation!(self, book, build_and)
-                }
-                Or => {
-                    op2_llvmnativei256_operation!(self, book, build_or)
-                }
-                Xor => {
-                    op2_llvmnativei256_operation!(self, book, build_xor)
-                }
-                Not => {
-                    op1_llvmnativei256_operation!(self, book, build_not)
-                }
+                Add => llvmnativei256_op2!(types, builder, book, build_int_add),
+                Sub => llvmnativei256_op2!(types, builder, book, build_int_sub),
+                Mul => llvmnativei256_op2!(types, builder, book, build_int_mul),
+                Div => llvmnativei256_op2!(types, builder, book, build_int_unsigned_div),
+                Sdiv => llvmnativei256_op2!(types, builder, book, build_int_signed_div),
+                Mod => llvmnativei256_op2!(types, builder, book, build_int_unsigned_rem),
+                Smod => llvmnativei256_op2!(types, builder, book, build_int_signed_rem),
+                Shl => llvmnativei256_lshift!(types, builder, book, build_left_shift),
+                Shr => llvmnativei256_rshift!(types, builder, book, build_right_shift, false),
+                Sar => llvmnativei256_rshift!(types, builder, book, build_right_shift, true),
+                Exp => op2_i256_exp!(context, types, builder, book, this, next, i),
+                Eq => llvmnativei256_cmp!(
+                    context,
+                    types,
+                    builder,
+                    book,
+                    this,
+                    next,
+                    instructions,
+                    i,
+                    op,
+                    IntPredicate::EQ
+                ),
+                Lt => llvmnativei256_cmp!(
+                    context,
+                    types,
+                    builder,
+                    book,
+                    this,
+                    next,
+                    instructions,
+                    i,
+                    op,
+                    IntPredicate::ULT
+                ),
+                Gt => llvmnativei256_cmp!(
+                    context,
+                    types,
+                    builder,
+                    book,
+                    this,
+                    next,
+                    instructions,
+                    i,
+                    op,
+                    IntPredicate::UGT
+                ),
+                Slt => llvmnativei256_cmp!(
+                    context,
+                    types,
+                    builder,
+                    book,
+                    this,
+                    next,
+                    instructions,
+                    i,
+                    op,
+                    IntPredicate::SLT
+                ),
+                Sgt => llvmnativei256_cmp!(
+                    context,
+                    types,
+                    builder,
+                    book,
+                    this,
+                    next,
+                    instructions,
+                    i,
+                    op,
+                    IntPredicate::SGT
+                ),
+                And => llvmnativei256_op2!(types, builder, book, build_and),
+                Or => llvmnativei256_op2!(types, builder, book, build_or),
+                Xor => llvmnativei256_op2!(types, builder, book, build_xor),
+                Not => llvmnativei256_op1!(types, builder, book, build_not),
                 Addmod => {
-                    let (book, a) = self.build_stack_pop(book)?;
-                    let (book, b) = self.build_stack_pop(book)?;
-                    let (book, n) = self.build_stack_pop(book)?;
+                    let (book, a) = build_stack_pop!(types, builder, book);
+                    let (book, b) = build_stack_pop!(types, builder, book);
+                    let (book, n) = build_stack_pop!(types, builder, book);
 
-                    let width = self.types.type_stackel.get_bit_width() * 2;
-                    let type_iup = self.context.custom_width_int_type(width);
+                    let width = types.type_stackel.get_bit_width() * 2;
+                    let type_iup = context.custom_width_int_type(width);
 
-                    let a_up = self
-                        .builder
-                        .build_int_cast_sign_flag(a, type_iup, false, "")?;
-                    let b_up = self
-                        .builder
-                        .build_int_cast_sign_flag(b, type_iup, false, "")?;
-                    let n_up = self
-                        .builder
-                        .build_int_cast_sign_flag(n, type_iup, false, "")?;
+                    let a_up = builder.build_int_cast_sign_flag(a, type_iup, false, "")?;
+                    let b_up = builder.build_int_cast_sign_flag(b, type_iup, false, "")?;
+                    let n_up = builder.build_int_cast_sign_flag(n, type_iup, false, "")?;
 
-                    let result = self.builder.build_int_add(a_up, b_up, "")?;
-                    let result = self.builder.build_int_unsigned_rem(result, n_up, "")?;
+                    let result = builder.build_int_add(a_up, b_up, "")?;
+                    let result = builder.build_int_unsigned_rem(result, n_up, "")?;
 
-                    let result =
-                        self.builder
-                            .build_int_cast(result, self.types.type_stackel, "")?;
+                    let result = builder.build_int_cast(result, types.type_stackel, "")?;
 
-                    self.build_stack_push(book, result)?
+                    build_stack_push!(types, builder, book, result)
                 }
                 Mulmod => {
-                    let (book, a) = self.build_stack_pop(book)?;
-                    let (book, b) = self.build_stack_pop(book)?;
-                    let (book, n) = self.build_stack_pop(book)?;
+                    let (book, a) = build_stack_pop!(types, builder, book);
+                    let (book, b) = build_stack_pop!(types, builder, book);
+                    let (book, n) = build_stack_pop!(types, builder, book);
 
-                    let width = self.types.type_stackel.get_bit_width() * 2;
-                    let type_iup = self.context.custom_width_int_type(width);
+                    let width = types.type_stackel.get_bit_width() * 2;
+                    let type_iup = context.custom_width_int_type(width);
 
-                    let a_up = self
-                        .builder
-                        .build_int_cast_sign_flag(a, type_iup, false, "")?;
-                    let b_up = self
-                        .builder
-                        .build_int_cast_sign_flag(b, type_iup, false, "")?;
-                    let n_up = self
-                        .builder
-                        .build_int_cast_sign_flag(n, type_iup, false, "")?;
+                    let a_up = builder.build_int_cast_sign_flag(a, type_iup, false, "")?;
+                    let b_up = builder.build_int_cast_sign_flag(b, type_iup, false, "")?;
+                    let n_up = builder.build_int_cast_sign_flag(n, type_iup, false, "")?;
 
-                    let result = self.builder.build_int_mul(a_up, b_up, "")?;
-                    let result = self.builder.build_int_unsigned_rem(result, n_up, "")?;
+                    let result = builder.build_int_mul(a_up, b_up, "")?;
+                    let result = builder.build_int_unsigned_rem(result, n_up, "")?;
 
-                    let result =
-                        self.builder
-                            .build_int_cast(result, self.types.type_stackel, "")?;
+                    let result = builder.build_int_cast(result, types.type_stackel, "")?;
 
-                    self.build_stack_push(book, result)?
+                    build_stack_push!(types, builder, book, result)
                 }
                 Signextend => {
-                    let (book, x) = self.build_stack_pop(book)?;
+                    let (book, x) = build_stack_pop!(types, builder, book);
 
-                    let const_32 = self.types.type_stackel.const_int(32, false);
-                    let cmp = self
-                        .builder
-                        .build_int_compare(IntPredicate::UGE, x, const_32, "")?;
+                    let const_32 = types.type_stackel.const_int(32, false);
+                    let cmp = builder.build_int_compare(IntPredicate::UGE, x, const_32, "")?;
 
                     let label = format!("Instruction #{}: Signextend / else", i);
                     let index = format!("_{}", i);
-                    let else_block =
-                        JitEvmEngineSimpleBlock::new(&self, this.block, &label, &index)?;
-                    self.builder.position_at_end(this.block);
-                    self.builder
-                        .build_conditional_branch(cmp, next.block, else_block.block)?;
+                    let else_block = JitEvmEngineSimpleBlock::new(
+                        context, &builder, this.block, &label, &index,
+                    )?;
+                    builder.position_at_end(this.block);
+                    builder.build_conditional_branch(cmp, next.block, else_block.block)?;
 
                     next.add_incoming(&book, &this);
                     else_block.add_incoming(&book, &this);
 
-                    self.builder.position_at_end(else_block.block);
+                    builder.position_at_end(else_block.block);
 
-                    let (book, y) = self.build_stack_pop(book)?;
+                    let (book, y) = build_stack_pop!(types, builder, book);
 
-                    let const_1 = self.types.type_stackel.const_int(1, false);
-                    let const_7 = self.types.type_stackel.const_int(7, false);
-                    let const_8 = self.types.type_stackel.const_int(8, false);
+                    let const_1 = types.type_stackel.const_int(1, false);
+                    let const_7 = types.type_stackel.const_int(7, false);
+                    let const_8 = types.type_stackel.const_int(8, false);
 
-                    let x_8 = self.builder.build_int_mul(x, const_8, "")?;
-                    let bit_index = self.builder.build_int_add(x_8, const_7, "")?;
-                    let bit = self.builder.build_left_shift(const_1, bit_index, "")?;
-                    let mask = self.builder.build_int_sub(bit, const_1, "")?;
+                    let x_8 = builder.build_int_mul(x, const_8, "")?;
+                    let bit_index = builder.build_int_add(x_8, const_7, "")?;
+                    let bit = builder.build_left_shift(const_1, bit_index, "")?;
+                    let mask = builder.build_int_sub(bit, const_1, "")?;
 
-                    let sign = self.builder.build_and(y, bit, "")?;
-                    let is_signed =
-                        self.builder
-                            .build_int_compare(IntPredicate::EQ, sign, bit, "")?;
+                    let sign = builder.build_and(y, bit, "")?;
+                    let is_signed = builder.build_int_compare(IntPredicate::EQ, sign, bit, "")?;
 
-                    let not_mask = self.builder.build_not(mask, "")?;
-                    let extended = self.builder.build_or(y, not_mask, "")?;
-                    let unextended = self.builder.build_and(y, mask, "")?;
+                    let not_mask = builder.build_not(mask, "")?;
+                    let extended = builder.build_or(y, not_mask, "")?;
+                    let unextended = builder.build_and(y, mask, "")?;
 
-                    let result = self
-                        .builder
+                    let result = builder
                         .build_select(is_signed, extended, unextended, "")?
                         .into_int_value();
 
-                    self.build_stack_push(book, result)?;
-                    self.builder.build_unconditional_branch(next.block)?;
+                    build_stack_push!(types, builder, book, result);
+                    builder.build_unconditional_branch(next.block)?;
 
                     continue; // skip auto-generated jump to next instruction
                 }
                 AugmentedPushJump(_, val) => {
                     if code.jumpdests.is_empty() {
                         // there are no valid jump targets, this Jump has to fail!
-                        self.builder.build_unconditional_branch(end.block)?;
+                        builder.build_unconditional_branch(end.block)?;
                         end.add_incoming(&book, &this);
                     } else {
                         // retrieve the corresponding jump target (panic if not a valid jump target) ...
                         let jmp_i = code.target2opidx[val];
                         // ... and jump to there!
-                        self.builder
-                            .build_unconditional_branch(instructions[jmp_i].block)?;
+                        builder.build_unconditional_branch(instructions[jmp_i].block)?;
                         instructions[jmp_i].add_incoming(&book, &this);
                     }
 
                     continue; // skip auto-generated jump to next instruction
                 }
                 AugmentedPushJumpi(_, val) => {
-                    let (book, condition) = self.build_stack_pop(book)?;
+                    let (book, condition) = build_stack_pop!(types, builder, book);
 
                     if code.jumpdests.is_empty() {
                         // there are no valid jump targets, this Jumpi has to fail!
-                        self.builder.build_unconditional_branch(end.block)?;
+                        builder.build_unconditional_branch(end.block)?;
                         end.add_incoming(&book, &this);
                     } else {
                         // retrieve the corresponding jump target (panic if not a valid jump target) ...
                         let jmp_i = code.target2opidx[val];
                         // ... and jump to there (conditionally)!
-                        let cmp = self.builder.build_int_compare(
+                        let cmp = builder.build_int_compare(
                             IntPredicate::EQ,
-                            self.types.type_stackel.const_int(0, false),
+                            types.type_stackel.const_int(0, false),
                             condition,
                             "",
                         )?;
-                        self.builder.build_conditional_branch(
+                        builder.build_conditional_branch(
                             cmp,
                             next.block,
                             instructions[jmp_i].block,
@@ -1236,17 +781,17 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 }
             };
 
-            self.builder.build_unconditional_branch(next.block)?;
+            builder.build_unconditional_branch(next.block)?;
             next.add_incoming(&book, &this);
         }
 
         // OUTPUT LLVM
-        if let Some(path) = self.debug_ir {
-            self.module.print_to_file(path)?;
+        if let Some(path) = debug_ir {
+            module.print_to_file(path)?;
         }
 
         // OUTPUT ASM
-        if let Some(path) = self.debug_asm {
+        if let Some(path) = debug_asm {
             // https://github.com/TheDan64/inkwell/issues/184
             // https://thedan64.github.io/inkwell/inkwell/targets/struct.TargetMachine.html#method.write_to_file
             use inkwell::targets::{CodeModel, FileType, RelocMode, TargetMachine};
@@ -1269,12 +814,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
             // create a module and do JIT stuff
 
-            machine.write_to_file(&self.module, FileType::Assembly, path.as_ref())?;
+            machine.write_to_file(&module, FileType::Assembly, path.as_ref())?;
         }
 
         // COMPILE
         let function: JitFunction<JitEvmCompiledContract> =
-            unsafe { self.execution_engine.get_function("executecontract")? };
+            unsafe { execution_engine.get_function("executecontract")? };
         Ok(JitEvmContract { function })
     }
 }
