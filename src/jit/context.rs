@@ -17,18 +17,6 @@ pub(in crate::jit) struct JitEvmPtrs {
     // TODO: block_context & tx_context....
 }
 
-// TODO: something like this, but for block_context & tx_context accessing state
-//impl<'ctx> JitEvmPtrs {
-//    /// Generate llvm type definition mirroring JitEvmPtrs layout.
-//    pub fn build_llvm_struct(target: &TargetData, context: &'ctx Context) -> inkwell::types::StructType<'ctx> {
-//	    context.struct_type(&[
-//		    context.ptr_sized_int_type(target, None).ptr_type(AddressSpace::Generic).into(), // stack
-//		    context.ptr_sized_int_type(target, None).ptr_type(AddressSpace::Generic).into(), // memory
-//		    context.ptr_sized_int_type(target, None).ptr_type(AddressSpace::Generic).into(), // storage
-//		], false)
-//	}
-//}
-
 impl JitEvmPtrs {
     pub fn from_raw(ptr: usize) -> JitEvmPtrs {
         unsafe { *(ptr as *mut _) }

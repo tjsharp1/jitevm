@@ -1,16 +1,13 @@
 use crate::jit::{
     error::JitEvmEngineError,
-    stack::{build_stack_inc, build_stack_pop, build_stack_push},
+    stack::{build_stack_inc, build_stack_pop},
     types::JitTypes,
-    JitContractBuilder, JitEvmEngineBookkeeping, JitEvmPtrs,
+    JitEvmEngineBookkeeping, JitEvmPtrs, OperationsContext,
 };
 use hex_literal::hex;
 use inkwell::{
-    builder::Builder,
-    context::Context,
     execution_engine::ExecutionEngine,
     module::Module,
-    types::{IntType, VoidType},
     values::{FunctionValue, IntValue},
     AddressSpace,
 };
@@ -22,7 +19,6 @@ pub const KECCAK_EMPTY: [u8; 32] =
     hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 
 pub struct HostFunctions<'ctx> {
-    types: JitTypes<'ctx>,
     cb_print_u64: FunctionValue<'ctx>,
     cb_print_u256: FunctionValue<'ctx>,
     callback_sha3_func: FunctionValue<'ctx>,
@@ -82,7 +78,6 @@ impl<'ctx> HostFunctions<'ctx> {
         };
 
         HostFunctions {
-            types,
             cb_print_u64,
             cb_print_u256,
             callback_sha3_func,
@@ -93,14 +88,14 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_print_u64(
         &self,
-        c: &JitContractBuilder<'ctx>,
+        c: &OperationsContext<'ctx>,
         val: IntValue<'ctx>,
         hex: bool,
     ) -> Result<(), JitEvmEngineError> {
-        let ptr = c.builder.build_alloca(self.types.type_stackel, "")?;
+        let ptr = c.builder.build_alloca(c.types.type_stackel, "")?;
         c.builder.build_store(ptr, val)?;
 
-        let hex = self.types.type_bool.const_int(hex as u64, false);
+        let hex = c.types.type_bool.const_int(hex as u64, false);
         c.builder
             .build_call(self.cb_print_u64, &[ptr.into(), hex.into()], "")?;
 
@@ -109,14 +104,14 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_print_u256(
         &self,
-        c: JitContractBuilder<'ctx>,
+        c: &OperationsContext<'ctx>,
         val: IntValue<'ctx>,
         hex: bool,
     ) -> Result<(), JitEvmEngineError> {
-        let ptr = c.builder.build_alloca(self.types.type_stackel, "")?;
+        let ptr = c.builder.build_alloca(c.types.type_stackel, "")?;
         c.builder.build_store(ptr, val)?;
 
-        let hex = self.types.type_bool.const_int(hex as u64, false);
+        let hex = c.types.type_bool.const_int(hex as u64, false);
         c.builder
             .build_call(self.cb_print_u256, &[ptr.into(), hex.into()], "")?;
 
@@ -125,16 +120,20 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_sha3(
         &self,
-        builder: &Builder<'ctx>,
+        ctx: &OperationsContext<'ctx>,
         book: JitEvmEngineBookkeeping<'ctx>,
     ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
-        let (book, offset) = build_stack_pop!(self.types, builder, book);
-        let (book, size) = build_stack_pop!(self.types, builder, book);
+        let (book, offset) = build_stack_pop!(ctx, book);
+        let (book, size) = build_stack_pop!(ctx, book);
 
-        let offset = builder.build_int_cast(offset, self.types.type_ptrint, "")?;
-        let size = builder.build_int_cast(size, self.types.type_ptrint, "")?;
+        let offset = ctx
+            .builder
+            .build_int_cast(offset, ctx.types.type_ptrint, "")?;
+        let size = ctx
+            .builder
+            .build_int_cast(size, ctx.types.type_ptrint, "")?;
 
-        builder.build_call(
+        ctx.builder.build_call(
             self.callback_sha3_func,
             &[
                 book.execution_context.into(),
@@ -145,15 +144,16 @@ impl<'ctx> HostFunctions<'ctx> {
             "",
         )?;
 
-        Ok(build_stack_inc!(self.types, builder, book))
+        Ok(build_stack_inc!(ctx, book))
     }
 
     pub fn build_sload(
         &self,
-        builder: &Builder<'ctx>,
+        ctx: &OperationsContext<'ctx>,
         book: JitEvmEngineBookkeeping<'ctx>,
     ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
-        let _retval = builder
+        let _retval = ctx
+            .builder
             .build_call(
                 self.callback_sload_func,
                 &[book.execution_context.into(), book.sp.into()],
@@ -169,10 +169,11 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_sstore(
         &self,
-        builder: &Builder<'ctx>,
+        ctx: &OperationsContext<'ctx>,
         book: JitEvmEngineBookkeeping<'ctx>,
     ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
-        let _retval = builder
+        let _retval = ctx
+            .builder
             .build_call(
                 self.callback_sstore_func,
                 &[book.execution_context.into(), book.sp.into()],
@@ -182,8 +183,8 @@ impl<'ctx> HostFunctions<'ctx> {
             .left()
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
-        let (book, _) = build_stack_pop!(self.types, builder, book);
-        let (book, _) = build_stack_pop!(self.types, builder, book);
+        let (book, _) = build_stack_pop!(ctx, book);
+        let (book, _) = build_stack_pop!(ctx, book);
 
         Ok(book)
     }

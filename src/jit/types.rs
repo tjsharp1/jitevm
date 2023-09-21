@@ -17,6 +17,7 @@ pub struct JitTypes<'ctx> {
     pub type_void: VoidType<'ctx>,
     pub type_retval: IntType<'ctx>,
     pub type_i8: IntType<'ctx>,
+    pub type_i64: IntType<'ctx>,
     /// Types for vectorized byte swapping, to re-order endianness
     pub type_ivec: VectorType<'ctx>,
     pub type_rvec: VectorType<'ctx>,
@@ -44,6 +45,9 @@ impl<'ctx> JitTypes<'ctx> {
         assert_eq!(type_retval.get_bit_width(), 64);
         assert_eq!(u64::BITS, 64);
 
+        // TODO: move this to types
+        let type_i64 = context.i64_type();
+
         // types for vectorized byte swapping
         let type_i8 = context.i8_type();
         let type_ivec = type_i8.vec_type(16);
@@ -66,6 +70,7 @@ impl<'ctx> JitTypes<'ctx> {
             type_bool,
             type_void,
             type_i8,
+            type_i64,
             type_ivec,
             type_rvec,
             swap_bytes,
