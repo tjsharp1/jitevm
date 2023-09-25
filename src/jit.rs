@@ -1,5 +1,8 @@
-use crate::code::{EvmOp, IndexedEvmCode};
 use crate::constants::*;
+use crate::{
+    code::{EvmOp, IndexedEvmCode},
+    jit::context::BlockContext,
+};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -466,6 +469,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Addmod => op2_i256_mod!(ctx, book, build_int_add),
                 Mulmod => op2_i256_mod!(ctx, book, build_int_mul),
                 Signextend => op_signextend!(ctx, book, this, next, i),
+                GasLimit => BlockContext::build_get_gas_limit(&ctx, &book)?,
+                BaseFee => BlockContext::build_get_basefee(&ctx, &book)?,
+                PrevRandao => BlockContext::build_get_randao(&ctx, &book)?,
+                Timestamp => BlockContext::build_get_timestamp(&ctx, &book)?,
+                Coinbase => BlockContext::build_get_coinbase(&ctx, &book)?,
+                Number => BlockContext::build_get_number(&ctx, &book)?,
                 AugmentedPushJump(_, val) => {
                     build_augmented_jump!(ctx, book, code, this, end, instructions, val)
                 }

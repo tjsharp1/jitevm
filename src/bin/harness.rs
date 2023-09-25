@@ -2,10 +2,11 @@ use jitevm::{
     code::{EvmCode, EvmOp},
     jit::{JitContractBuilder, JitEvmExecutionContext},
 };
-use primitive_types::U256;
+use primitive_types::{H160, U256};
 use rand::Rng;
+use std::collections::{HashMap, HashSet};
 
-fn test_jit_storage(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
+fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
     use inkwell::context::Context;
 
     let context = Context::create();
@@ -23,36 +24,36 @@ fn test_jit_storage(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionCont
 }
 
 fn main() {
-    use jitevm::operations;
+    let mut execution_context = JitEvmExecutionContext::new();
 
-    fn _test(a: U256, b: U256) {
-        let mut ctx = JitEvmExecutionContext::new();
+    let mut expected_store = HashMap::new();
+    let mut ops = Vec::new();
 
-        test_jit_storage(
-            vec![EvmOp::Push(32, b), EvmOp::Push(32, a), EvmOp::Exp],
-            &mut ctx,
-        );
+    let mut coinbase = rand::thread_rng().gen::<[u8; 32]>();
+    coinbase[..12].copy_from_slice(&[0u8; 12]);
+    execution_context
+        .block_context
+        .set_coinbase(H160::from_slice(&coinbase[12..]));
+    expected_store.insert(U256::one(), U256::from_little_endian(&coinbase));
 
-        let JitEvmExecutionContext { stack, .. } = ctx;
+    ops.push(EvmOp::Coinbase);
+    ops.push(EvmOp::Push(32, U256::one()));
+    ops.push(EvmOp::Sstore);
 
-        let d = stack[0];
-        let d_ = operations::Exp(a, b);
-        if d != d_ {
-            println!("a = {:?} / b = {:?} \n\n d = {:?} / d' = {:?}", a, b, d, d_);
-        }
-        assert_eq!(d, d_);
-    }
+    test_jit(ops, &mut execution_context);
 
-    _test(U256::zero(), U256::zero());
-    _test(U256::zero(), U256::one());
-    _test(U256::one(), U256::zero());
-    _test(U256::one(), U256::one());
+    let JitEvmExecutionContext { storage, .. } = execution_context;
 
-    for _i in 0..1000 {
-        let a = rand::thread_rng().gen::<[u8; 32]>();
-        let b = rand::thread_rng().gen::<[u8; 32]>();
+    let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+    let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
 
-        let a = U256::from_big_endian(&a);
-        _test(a, U256::from_big_endian(&b));
+    let diff = expected_keys.symmetric_difference(&actual_keys).count();
+    assert_eq!(diff, 0);
+
+    for (key, value) in expected_store.iter() {
+        let stored = *storage.get(key).expect("Storage should have item");
+        println!("e: {:x?}", value);
+        println!("g: {:x?}", stored);
+        assert_eq!(*value, stored);
     }
 }

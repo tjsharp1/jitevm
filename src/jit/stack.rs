@@ -191,3 +191,4 @@ macro_rules! build_dup {
 
 pub(crate) use build_stack_inc;
 pub(crate) use build_stack_pop;
+pub(crate) use build_stack_push;

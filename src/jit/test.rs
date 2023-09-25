@@ -3,7 +3,7 @@ use crate::{
     jit::{JitContractBuilder, JitEvmExecutionContext},
 };
 use paste::paste;
-use primitive_types::U256;
+use primitive_types::{H160, H256, U256};
 use rand::{Rng, RngCore};
 use sha3::{Digest, Keccak256};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +24,141 @@ fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
         .call(execution_context)
         .expect("Contract call failed");
     assert_eq!(ret, 0);
+}
+
+macro_rules! check_context {
+    ($evmop:expr, $setter:ident, $ty:ident) => {{
+        for _ in 0..1000 {
+            let mut context = JitEvmExecutionContext::new();
+
+            let mut expected_store = HashMap::new();
+            let mut expected_mem = Vec::new();
+            let mut ops = Vec::new();
+
+            check_context!($setter, expected_mem, context, expected_store, $ty);
+
+            ops.push($evmop);
+            ops.push(EvmOp::Push(32, U256::zero()));
+            ops.push(EvmOp::Sstore);
+            ops.push(EvmOp::Push(32, U256::zero()));
+            ops.push(EvmOp::Sload);
+            ops.push(EvmOp::Push(32, U256::zero()));
+            ops.push(EvmOp::Mstore);
+
+            test_jit(ops, &mut context);
+
+            let JitEvmExecutionContext {
+                storage, memory, ..
+            } = context;
+
+            let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+            let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+            let diff = expected_keys.symmetric_difference(&actual_keys).count();
+            assert_eq!(diff, 0);
+
+            for (key, value) in expected_store.iter() {
+                let stored = *storage.get(key).expect("Storage should have item");
+                let start = key.as_usize() * 0x20;
+                let mem_range = start..start + 0x20;
+                assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+                assert_eq!(*value, stored);
+            }
+        }
+    }};
+    ($setter:ident, $mem:ident, $ctx:ident, $store:ident, u256) => {{
+        let val = rand::thread_rng().gen::<[u8; 32]>();
+        $mem.extend(val.to_vec());
+        let val = U256::from(val);
+        $ctx.block_context.$setter(val);
+        $store.insert(U256::zero(), val);
+    }};
+    ($setter:ident, $mem:ident, $ctx:ident, $store:ident, h160) => {{
+        let mut val = rand::thread_rng().gen::<[u8; 32]>();
+        val[..12].copy_from_slice(&[0u8; 12]);
+        $mem.extend(val.to_vec());
+        $ctx.block_context.$setter(H160::from_slice(&val[12..]));
+        $store.insert(U256::zero(), U256::from_big_endian(&val));
+    }};
+    ($setter:ident, $mem:ident, $ctx:ident, $store:ident, h256) => {{
+        let val = rand::thread_rng().gen::<[u8; 32]>();
+        $mem.extend(val.to_vec());
+        $ctx.block_context.$setter(H256::from_slice(&val));
+        $store.insert(U256::zero(), U256::from_big_endian(&val));
+    }};
+}
+
+#[test]
+fn operations_jit_test_block_context_number() {
+    check_context!(EvmOp::Number, set_number, u256);
+}
+
+#[test]
+fn operations_jit_test_block_context_coinbase() {
+    check_context!(EvmOp::Coinbase, set_coinbase, h160);
+}
+
+#[test]
+fn operations_jit_test_block_context_timestamp() {
+    check_context!(EvmOp::Timestamp, set_timestamp, u256);
+}
+
+#[test]
+fn operations_jit_test_block_context_randao() {
+    check_context!(EvmOp::PrevRandao, set_prevrandao, h256);
+}
+
+#[test]
+fn operations_jit_test_block_context_basefee() {
+    check_context!(EvmOp::BaseFee, set_basefee, u256);
+}
+
+#[test]
+fn operations_jit_test_block_context_gas_limit() {
+    check_context!(EvmOp::GasLimit, set_gas_limit, u256);
+}
+
+#[test]
+fn operations_jit_test_stop() {
+    for _ in 0..1000 {
+        let mut execution_context = JitEvmExecutionContext::new();
+
+        let mut expected_store = HashMap::new();
+        let mut ops = Vec::new();
+
+        expected_store.insert(U256::zero(), U256::one());
+        ops.push(EvmOp::Push(32, U256::one()));
+        ops.push(EvmOp::Push(32, U256::zero()));
+        ops.push(EvmOp::Sstore);
+
+        expected_store.insert(U256::one(), U256::one() * 2);
+        ops.push(EvmOp::Push(32, U256::one() * 2));
+        ops.push(EvmOp::Push(32, U256::one()));
+        ops.push(EvmOp::Sstore);
+
+        ops.push(EvmOp::Stop);
+        ops.push(EvmOp::Push(32, U256::one() * 3));
+        ops.push(EvmOp::Push(32, U256::one()));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, U256::one() * 8));
+        ops.push(EvmOp::Push(32, U256::zero()));
+        ops.push(EvmOp::Sstore);
+
+        test_jit(ops, &mut execution_context);
+
+        let JitEvmExecutionContext { storage, .. } = execution_context;
+
+        let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+        let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+        let diff = expected_keys.symmetric_difference(&actual_keys).count();
+        assert_eq!(diff, 0);
+
+        for (key, value) in expected_store.iter() {
+            let stored = *storage.get(key).expect("Storage should have item");
+            assert_eq!(*value, stored);
+        }
+    }
 }
 
 #[test]
@@ -592,7 +727,6 @@ test_op_swap!(swap13, EvmOp::Swap13, 13);
 test_op_swap!(swap14, EvmOp::Swap14, 14);
 test_op_swap!(swap15, EvmOp::Swap15, 15);
 test_op_swap!(swap16, EvmOp::Swap16, 16);
-//Stop,
 //Byte,
 //Address,
 //Balance,
@@ -611,11 +745,6 @@ test_op_swap!(swap16, EvmOp::Swap16, 16);
 //ReturnDataCopy,
 //ExtCodeHash,
 //BlockHash,
-//Coinbase,
-//Timestamp,
-//Number,
-//PrevRandao,
-//GasLimit,
 //ChainId,
 //SelfBalance,
 //BaseFee,
@@ -644,5 +773,3 @@ test_op_swap!(swap16, EvmOp::Swap16, 16);
 
 //AugmentedPushJump(usize, U256),
 //AugmentedPushJumpi(usize, U256),
-
-//Unknown(u8),
