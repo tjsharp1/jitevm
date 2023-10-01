@@ -2,7 +2,7 @@ use primitive_types::U256;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EvmOp {
     Stop,
     Add,

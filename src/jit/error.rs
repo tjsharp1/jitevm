@@ -11,6 +11,8 @@ pub enum JitEvmEngineError {
     LlvmBuilderError(#[from] BuilderError),
     #[error("NoInstructionValue")]
     NoInstructionValue,
+    #[error("NoInstructionsToRender")]
+    NoInstructionsToRender,
     #[error("StringError: {0:?}")]
     UnknownStringError(String),
 }

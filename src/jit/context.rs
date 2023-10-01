@@ -1,6 +1,7 @@
 use crate::constants::*;
 use crate::jit::{
-    error::JitEvmEngineError, stack::build_stack_push, JitEvmEngineBookkeeping, OperationsContext,
+    cursor::CurrentInstruction, error::JitEvmEngineError, stack::build_stack_push,
+    JitEvmEngineBookkeeping, OperationsContext,
 };
 use inkwell::{
     context::Context, targets::TargetData, types::StructType, values::PointerValue, AddressSpace,
@@ -157,10 +158,12 @@ impl<'ctx> BlockContext {
         ctx.struct_type(&fields, false)
     }
 
-    pub fn build_get_number(
+    pub(crate) fn build_get_number<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -171,13 +174,18 @@ impl<'ctx> BlockContext {
         let ptr = ctx.builder.build_struct_gep(ptr, 0, "get_number")?;
 
         let value = ctx.builder.build_load(ptr, "load_number")?.into_int_value();
-        Ok(build_stack_push!(ctx, book, value))
+        let book = build_stack_push!(ctx, book, value);
+
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_get_coinbase(
+    pub(crate) fn build_get_coinbase<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -191,14 +199,18 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ptr, "load_coinbase")?
             .into_int_value();
+        let book = build_stack_push!(ctx, book, value);
 
-        Ok(build_stack_push!(ctx, book, value))
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_get_timestamp(
+    pub(crate) fn build_get_timestamp<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -213,13 +225,18 @@ impl<'ctx> BlockContext {
             .build_load(ptr, "load_timestamp")?
             .into_int_value();
 
-        Ok(build_stack_push!(ctx, book, value))
+        let book = build_stack_push!(ctx, book, value);
+
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_get_difficulty(
+    pub(crate) fn build_get_difficulty<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -234,13 +251,18 @@ impl<'ctx> BlockContext {
             .build_load(ptr, "load_difficulty")?
             .into_int_value();
 
-        Ok(build_stack_push!(ctx, book, value))
+        let book = build_stack_push!(ctx, book, value);
+
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_get_randao(
+    pub(crate) fn build_get_randao<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -251,13 +273,18 @@ impl<'ctx> BlockContext {
         let ptr = ctx.builder.build_struct_gep(ptr, 4, "get_randao")?;
 
         let value = ctx.builder.build_load(ptr, "load_randao")?.into_int_value();
-        Ok(build_stack_push!(ctx, book, value))
+        let book = build_stack_push!(ctx, book, value);
+
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_get_basefee(
+    pub(crate) fn build_get_basefee<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -271,13 +298,18 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ptr, "load_basefee")?
             .into_int_value();
-        Ok(build_stack_push!(ctx, book, value))
+        let book = build_stack_push!(ctx, book, value);
+
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_get_gas_limit(
+    pub(crate) fn build_get_gas_limit<'a>(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -288,7 +320,10 @@ impl<'ctx> BlockContext {
         let ptr = ctx.builder.build_struct_gep(ptr, 6, "get_gas")?;
 
         let value = ctx.builder.build_load(ptr, "load_gas")?.into_int_value();
-        Ok(build_stack_push!(ctx, book, value))
+        let book = build_stack_push!(ctx, book, value);
+
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 }
 

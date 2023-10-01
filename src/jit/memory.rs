@@ -1,92 +1,112 @@
+use crate::jit::stack::{build_stack_pop, build_stack_pop_vector, build_stack_push_vector};
+use crate::jit::{
+    cursor::CurrentInstruction, JitEvmEngineError, OperationsContext, EVM_JIT_STACK_ALIGN,
+};
+use inkwell::{values::BasicValue, AddressSpace};
+
 // TODO: memory growth checks
-macro_rules! build_mstore {
-    ($ctx:ident, $book:ident) => {{
-        let (book, offset) = build_stack_pop!($ctx, $book);
-        let (book, vec0, vec1) = build_stack_pop_vector!($ctx, book);
+pub(crate) fn build_mstore_op<'a, 'ctx>(
+    ctx: &OperationsContext<'ctx>,
+    current: &CurrentInstruction<'a, 'ctx>,
+) -> Result<(), JitEvmEngineError> {
+    let book = current.book();
 
-        let shuffled = $ctx
-            .builder
-            .build_shuffle_vector(vec0, vec1, $ctx.types.swap_bytes, "")?;
+    let (book, offset) = build_stack_pop!(ctx, book);
+    let (book, vec0, vec1) = build_stack_pop_vector!(ctx, book);
 
-        let casted = $ctx
-            .builder
-            .build_int_cast(offset, $ctx.types.type_ptrint, "")?;
-        let mem = $ctx.builder.build_int_add(book.mem, casted, "")?;
-        let dest_ptr = $ctx.builder.build_int_to_ptr(
-            mem,
-            $ctx.types.type_stackel.ptr_type(AddressSpace::default()),
-            "",
-        )?;
+    let shuffled = ctx
+        .builder
+        .build_shuffle_vector(vec0, vec1, ctx.types.swap_bytes, "")?;
 
-        $ctx.builder
-            .build_store(dest_ptr, shuffled)?
-            .set_alignment(1)?;
+    let casted = ctx
+        .builder
+        .build_int_cast(offset, ctx.types.type_ptrint, "")?;
+    let mem = ctx.builder.build_int_add(book.mem, casted, "")?;
+    let dest_ptr = ctx.builder.build_int_to_ptr(
+        mem,
+        ctx.types.type_stackel.ptr_type(AddressSpace::default()),
+        "",
+    )?;
 
-        book
-    }};
+    ctx.builder
+        .build_store(dest_ptr, shuffled)?
+        .set_alignment(1)?;
+
+    jump_next!(book, ctx, current);
+    Ok(())
 }
 
-macro_rules! build_mstore8 {
-    ($ctx:ident, $book:ident) => {{
-        let (book, offset) = build_stack_pop!($ctx, $book);
-        let (book, value) = build_stack_pop!($ctx, book);
-        let value_casted = $ctx.builder.build_int_cast(value, $ctx.types.type_i8, "")?;
-        let offset_casted = $ctx
-            .builder
-            .build_int_cast(offset, $ctx.types.type_ptrint, "")?;
+pub(crate) fn build_mstore8_op<'a, 'ctx>(
+    ctx: &OperationsContext<'ctx>,
+    current: &CurrentInstruction<'a, 'ctx>,
+) -> Result<(), JitEvmEngineError> {
+    let book = current.book();
 
-        let mem = $ctx.builder.build_int_add(book.mem, offset_casted, "")?;
-        let dest_ptr = $ctx.builder.build_int_to_ptr(
-            mem,
-            $ctx.types.type_i8.ptr_type(AddressSpace::default()),
-            "",
-        )?;
+    let (book, offset) = build_stack_pop!(ctx, book);
+    let (book, value) = build_stack_pop!(ctx, book);
+    let value_casted = ctx.builder.build_int_cast(value, ctx.types.type_i8, "")?;
+    let offset_casted = ctx
+        .builder
+        .build_int_cast(offset, ctx.types.type_ptrint, "")?;
 
-        $ctx.builder.build_store(dest_ptr, value_casted)?;
+    let mem = ctx.builder.build_int_add(book.mem, offset_casted, "")?;
+    let dest_ptr = ctx.builder.build_int_to_ptr(
+        mem,
+        ctx.types.type_i8.ptr_type(AddressSpace::default()),
+        "",
+    )?;
 
-        book
-    }};
+    ctx.builder.build_store(dest_ptr, value_casted)?;
+
+    jump_next!(book, ctx, current);
+    Ok(())
 }
 
-macro_rules! build_mload {
-    ($ctx:ident, $book:ident) => {{
-        let (book, offset) = build_stack_pop!($ctx, $book);
-        let casted = $ctx
-            .builder
-            .build_int_cast(offset, $ctx.types.type_ptrint, "")?;
+pub(crate) fn build_mload_op<'a, 'ctx>(
+    ctx: &OperationsContext<'ctx>,
+    current: &CurrentInstruction<'a, 'ctx>,
+) -> Result<(), JitEvmEngineError> {
+    let book = current.book();
 
-        let mem0 = $ctx.builder.build_int_add(book.mem, casted, "")?;
-        let mem1_offset = $ctx
-            .types
-            .type_ptrint
-            .const_int(EVM_JIT_STACK_ALIGN as u64, false);
-        let mem1 = $ctx.builder.build_int_add(mem0, mem1_offset, "")?;
+    let (book, offset) = build_stack_pop!(ctx, book);
+    let casted = ctx
+        .builder
+        .build_int_cast(offset, ctx.types.type_ptrint, "")?;
 
-        let mem0_ptr = $ctx.builder.build_int_to_ptr(
-            mem0,
-            $ctx.types.type_ivec.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-        let mem1_ptr = $ctx.builder.build_int_to_ptr(
-            mem1,
-            $ctx.types.type_ivec.ptr_type(AddressSpace::default()),
-            "",
-        )?;
+    let mem0 = ctx.builder.build_int_add(book.mem, casted, "")?;
+    let mem1_offset = ctx
+        .types
+        .type_ptrint
+        .const_int(EVM_JIT_STACK_ALIGN as u64, false);
+    let mem1 = ctx.builder.build_int_add(mem0, mem1_offset, "")?;
 
-        let vec0 = $ctx.builder.build_load(mem0_ptr, "")?.into_vector_value();
-        let vec1 = $ctx.builder.build_load(mem1_ptr, "")?.into_vector_value();
+    let mem0_ptr = ctx.builder.build_int_to_ptr(
+        mem0,
+        ctx.types.type_ivec.ptr_type(AddressSpace::default()),
+        "",
+    )?;
+    let mem1_ptr = ctx.builder.build_int_to_ptr(
+        mem1,
+        ctx.types.type_ivec.ptr_type(AddressSpace::default()),
+        "",
+    )?;
 
-        vec0.as_instruction_value()
-            .ok_or(JitEvmEngineError::NoInstructionValue)?
-            .set_alignment(1)?;
-        vec1.as_instruction_value()
-            .ok_or(JitEvmEngineError::NoInstructionValue)?
-            .set_alignment(1)?;
+    let vec0 = ctx.builder.build_load(mem0_ptr, "")?.into_vector_value();
+    let vec1 = ctx.builder.build_load(mem1_ptr, "")?.into_vector_value();
 
-        let shuffled = $ctx
-            .builder
-            .build_shuffle_vector(vec0, vec1, $ctx.types.swap_bytes, "")?;
+    vec0.as_instruction_value()
+        .ok_or(JitEvmEngineError::NoInstructionValue)?
+        .set_alignment(1)?;
+    vec1.as_instruction_value()
+        .ok_or(JitEvmEngineError::NoInstructionValue)?
+        .set_alignment(1)?;
 
-        build_stack_push_vector!($ctx, book, shuffled)
-    }};
+    let shuffled = ctx
+        .builder
+        .build_shuffle_vector(vec0, vec1, ctx.types.swap_bytes, "")?;
+
+    let book = build_stack_push_vector!(ctx, book, shuffled);
+
+    jump_next!(book, ctx, current);
+    Ok(())
 }

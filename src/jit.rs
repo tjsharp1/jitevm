@@ -17,21 +17,21 @@ use inkwell::OptimizationLevel;
 #[cfg(test)]
 mod test;
 
-#[macro_use]
-mod arithmetic;
-#[macro_use]
-mod bytes;
-mod context;
-mod error;
-mod ffi;
+mod cursor;
 #[macro_use]
 mod jump;
 #[macro_use]
+mod bytes;
+mod arithmetic;
+mod context;
+mod error;
+mod ffi;
 mod memory;
 #[macro_use]
 mod stack;
 mod types;
 
+use cursor::LendingIterator;
 use ffi::*;
 
 pub use context::JitEvmExecutionContext;
@@ -213,282 +213,101 @@ impl<'ctx> JitContractBuilder<'ctx> {
             host_functions,
         } = self;
 
-        // SETUP JIT'ED CONTRACT FUNCTION
-
-        let executecontract_fn_type = ctx
-            .types
-            .type_retval
-            .fn_type(&[ctx.types.type_ptrint.into()], false);
-        let function = ctx
-            .module
-            .add_function("executecontract", executecontract_fn_type, None);
-
-        // SETUP HANDLER
-
-        let setup_block = ctx.context.append_basic_block(function, "setup");
-        ctx.builder.position_at_end(setup_block);
-
-        let setup_book = {
-            let execution_context = function.get_nth_param(0).unwrap().into_int_value();
-            let execution_context_ptr = ctx.builder.build_int_to_ptr(
-                execution_context,
-                ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
-                "",
-            )?;
-            let sp_int = ctx
-                .builder
-                .build_load(execution_context_ptr, "")?
-                .into_int_value();
-            let max_offset = (EVM_STACK_SIZE - 1) as u64 * EVM_STACK_ELEMENT_SIZE;
-            let sp_max = ctx.builder.build_int_add(
-                sp_int,
-                ctx.types.type_ptrint.const_int(max_offset, false),
-                "",
-            )?;
-            let mem_offset = ctx.builder.build_int_add(
-                execution_context,
-                ctx.types.type_ptrint.size_of(),
-                "",
-            )?;
-            let mem_ptr = ctx.builder.build_int_to_ptr(
-                mem_offset,
-                ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
-                "",
-            )?;
-            let mem = ctx.builder.build_load(mem_ptr, "")?.into_int_value();
-            JitEvmEngineBookkeeping {
-                execution_context: execution_context,
-                sp_min: sp_int,
-                sp_max: sp_max,
-                sp: sp_int,
-                mem,
-                // retval: retval
-            }
-        };
-
-        // INSTRUCTIONS
-
-        let ops_len = code.code.ops.len();
-        assert!(ops_len > 0);
-
-        let mut instructions: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
-        for i in 0..ops_len {
-            let block_before = if i == 0 {
-                setup_block
-            } else {
-                instructions[i - 1].block
-            };
-            let label = format!("Instruction #{}: {:?}", i, code.code.ops[i]);
-            instructions.push(JitEvmEngineSimpleBlock::new(
-                &ctx,
-                block_before,
-                &label,
-                &format!("_{}", i),
-            )?);
-        }
-
-        ctx.builder.position_at_end(setup_block);
-        ctx.builder
-            .build_unconditional_branch(instructions[0].block)?;
-        instructions[0].phi_setup_block(&setup_book, &setup_block);
-
-        // END HANDLER
-
-        let end =
-            JitEvmEngineSimpleBlock::new(&ctx, instructions[ops_len - 1].block, &"end", &"-end")?;
-        ctx.builder
-            .build_return(Some(&ctx.types.type_retval.const_int(0, false)))?;
-
-        // ERROR-JUMPDEST HANDLER
-
-        let error_jumpdest =
-            JitEvmEngineSimpleBlock::new(&ctx, end.block, &"error-jumpdest", &"-error-jumpdest")?;
-        ctx.builder
-            .build_return(Some(&ctx.types.type_retval.const_int(1, false)))?;
+        let cursor = cursor::InstructionCursor::new(&ctx, code)?;
+        let mut iter = cursor.iter();
 
         // RENDER INSTRUCTIONS
 
-        for (i, op) in code.code.ops.iter().enumerate() {
+        while let Some(current) = iter.next() {
             use EvmOp::*;
 
-            let this = instructions[i];
+            ctx.builder.position_at_end(current.block().block);
 
-            ctx.builder.position_at_end(this.block);
-
-            let book = this.book();
-
-            let next = if i + 1 == ops_len {
-                end
-            } else {
-                instructions[i + 1]
-            };
-
-            let book = match op {
-                Stop => {
-                    let val = ctx.types.type_retval.const_int(0, false);
-                    ctx.builder.build_return(Some(&val))?;
-                    continue; // skip auto-generated jump to next instruction
-                }
-                Push(_, val) => {
-                    let val = ctx.types.type_stackel.const_int_arbitrary_precision(&val.0);
-                    let book = build_stack_push!(ctx, book, val);
-                    book
-                }
-                Pop => {
-                    let (book, _) = build_stack_pop!(ctx, book);
-                    book
-                }
-                Jumpdest => book,
-                Mstore => build_mstore!(ctx, book),
-                Mstore8 => build_mstore8!(ctx, book),
-                Mload => build_mload!(ctx, book),
-                Sload => host_functions.build_sload(&ctx, book)?,
-                Sstore => host_functions.build_sstore(&ctx, book)?,
-                Sha3 => host_functions.build_sha3(&ctx, book)?,
-                Jump => build_jump!(
-                    ctx,
-                    book,
-                    code,
-                    this,
-                    end,
-                    instructions,
-                    error_jumpdest,
-                    i,
-                    op
-                ),
-                Jumpi => build_jumpi!(
-                    ctx,
-                    book,
-                    code,
-                    this,
-                    next,
-                    end,
-                    instructions,
-                    error_jumpdest,
-                    i,
-                    op
-                ),
-                Swap1 => build_stack_swap!(ctx, book, 1 + 1),
-                Swap2 => build_stack_swap!(ctx, book, 2 + 1),
-                Swap3 => build_stack_swap!(ctx, book, 3 + 1),
-                Swap4 => build_stack_swap!(ctx, book, 4 + 1),
-                Swap5 => build_stack_swap!(ctx, book, 5 + 1),
-                Swap6 => build_stack_swap!(ctx, book, 6 + 1),
-                Swap7 => build_stack_swap!(ctx, book, 7 + 1),
-                Swap8 => build_stack_swap!(ctx, book, 8 + 1),
-                Swap9 => build_stack_swap!(ctx, book, 9 + 1),
-                Swap10 => build_stack_swap!(ctx, book, 10 + 1),
-                Swap11 => build_stack_swap!(ctx, book, 11 + 1),
-                Swap12 => build_stack_swap!(ctx, book, 12 + 1),
-                Swap13 => build_stack_swap!(ctx, book, 13 + 1),
-                Swap14 => build_stack_swap!(ctx, book, 14 + 1),
-                Swap15 => build_stack_swap!(ctx, book, 15 + 1),
-                Swap16 => build_stack_swap!(ctx, book, 16 + 1),
-                Dup1 => build_dup!(ctx, book, 1),
-                Dup2 => build_dup!(ctx, book, 2),
-                Dup3 => build_dup!(ctx, book, 3),
-                Dup4 => build_dup!(ctx, book, 4),
-                Dup5 => build_dup!(ctx, book, 5),
-                Dup6 => build_dup!(ctx, book, 6),
-                Dup7 => build_dup!(ctx, book, 7),
-                Dup8 => build_dup!(ctx, book, 8),
-                Dup9 => build_dup!(ctx, book, 9),
-                Dup10 => build_dup!(ctx, book, 10),
-                Dup11 => build_dup!(ctx, book, 11),
-                Dup12 => build_dup!(ctx, book, 12),
-                Dup13 => build_dup!(ctx, book, 13),
-                Dup14 => build_dup!(ctx, book, 14),
-                Dup15 => build_dup!(ctx, book, 15),
-                Dup16 => build_dup!(ctx, book, 16),
-                Iszero => llvmnativei256_iszero!(ctx, book, this, next, op, i),
-                Add => llvmnativei256_op2!(ctx, book, build_int_add),
-                Sub => llvmnativei256_op2!(ctx, book, build_int_sub),
-                Mul => llvmnativei256_op2!(ctx, book, build_int_mul),
-                Div => llvmnativei256_op2!(ctx, book, build_int_unsigned_div),
-                Sdiv => llvmnativei256_op2!(ctx, book, build_int_signed_div),
-                Mod => llvmnativei256_op2!(ctx, book, build_int_unsigned_rem),
-                Smod => llvmnativei256_op2!(ctx, book, build_int_signed_rem),
-                Shl => llvmnativei256_lshift!(ctx, book, build_left_shift),
-                Shr => llvmnativei256_rshift!(ctx, book, build_right_shift, false),
-                Sar => llvmnativei256_rshift!(ctx, book, build_right_shift, true),
-                Exp => op2_i256_exp!(ctx, book, this, next, i),
-                Eq => llvmnativei256_cmp!(
-                    ctx,
-                    book,
-                    this,
-                    next,
-                    instructions,
-                    i,
-                    op,
-                    IntPredicate::EQ
-                ),
-                Lt => llvmnativei256_cmp!(
-                    ctx,
-                    book,
-                    this,
-                    next,
-                    instructions,
-                    i,
-                    op,
-                    IntPredicate::ULT
-                ),
-                Gt => llvmnativei256_cmp!(
-                    ctx,
-                    book,
-                    this,
-                    next,
-                    instructions,
-                    i,
-                    op,
-                    IntPredicate::UGT
-                ),
-                Slt => llvmnativei256_cmp!(
-                    ctx,
-                    book,
-                    this,
-                    next,
-                    instructions,
-                    i,
-                    op,
-                    IntPredicate::SLT
-                ),
-                Sgt => llvmnativei256_cmp!(
-                    ctx,
-                    book,
-                    this,
-                    next,
-                    instructions,
-                    i,
-                    op,
-                    IntPredicate::SGT
-                ),
-                And => llvmnativei256_op2!(ctx, book, build_and),
-                Or => llvmnativei256_op2!(ctx, book, build_or),
-                Xor => llvmnativei256_op2!(ctx, book, build_xor),
-                Not => llvmnativei256_op1!(ctx, book, build_not),
-                Addmod => op2_i256_mod!(ctx, book, build_int_add),
-                Mulmod => op2_i256_mod!(ctx, book, build_int_mul),
-                Signextend => op_signextend!(ctx, book, this, next, i),
-                GasLimit => BlockContext::build_get_gas_limit(&ctx, &book)?,
-                BaseFee => BlockContext::build_get_basefee(&ctx, &book)?,
-                PrevRandao => BlockContext::build_get_randao(&ctx, &book)?,
-                Timestamp => BlockContext::build_get_timestamp(&ctx, &book)?,
-                Coinbase => BlockContext::build_get_coinbase(&ctx, &book)?,
-                Number => BlockContext::build_get_number(&ctx, &book)?,
-                AugmentedPushJump(_, val) => {
-                    build_augmented_jump!(ctx, book, code, this, end, instructions, val)
-                }
-                AugmentedPushJumpi(_, val) => {
-                    build_augmented_jumpi!(ctx, book, code, this, next, end, instructions, val)
-                }
-
+            match current.op() {
+                Stop => jump::build_stop_op(&ctx, current)?,
+                Push(_, val) => stack::build_push_op(&ctx, current, val)?,
+                Pop => stack::build_pop_op(&ctx, current)?,
+                Jumpdest => jump::build_jumpdest_op(&ctx, current)?,
+                Mstore => memory::build_mstore_op(&ctx, current)?,
+                Mstore8 => memory::build_mstore8_op(&ctx, current)?,
+                Mload => memory::build_mload_op(&ctx, current)?,
+                Sload => host_functions.build_sload(&ctx, current)?,
+                Sstore => host_functions.build_sstore(&ctx, current)?,
+                Sha3 => host_functions.build_sha3(&ctx, current)?,
+                Jump => jump::build_jump_op(&ctx, current)?,
+                Jumpi => jump::build_jumpi_op(&ctx, current)?,
+                Swap1 => stack::build_stack_swap_op(&ctx, current, 1)?,
+                Swap2 => stack::build_stack_swap_op(&ctx, current, 2)?,
+                Swap3 => stack::build_stack_swap_op(&ctx, current, 3)?,
+                Swap4 => stack::build_stack_swap_op(&ctx, current, 4)?,
+                Swap5 => stack::build_stack_swap_op(&ctx, current, 5)?,
+                Swap6 => stack::build_stack_swap_op(&ctx, current, 6)?,
+                Swap7 => stack::build_stack_swap_op(&ctx, current, 7)?,
+                Swap8 => stack::build_stack_swap_op(&ctx, current, 8)?,
+                Swap9 => stack::build_stack_swap_op(&ctx, current, 9)?,
+                Swap10 => stack::build_stack_swap_op(&ctx, current, 10)?,
+                Swap11 => stack::build_stack_swap_op(&ctx, current, 11)?,
+                Swap12 => stack::build_stack_swap_op(&ctx, current, 12)?,
+                Swap13 => stack::build_stack_swap_op(&ctx, current, 13)?,
+                Swap14 => stack::build_stack_swap_op(&ctx, current, 14)?,
+                Swap15 => stack::build_stack_swap_op(&ctx, current, 15)?,
+                Swap16 => stack::build_stack_swap_op(&ctx, current, 16)?,
+                Dup1 => stack::build_dup_op(&ctx, current, 1)?,
+                Dup2 => stack::build_dup_op(&ctx, current, 2)?,
+                Dup3 => stack::build_dup_op(&ctx, current, 3)?,
+                Dup4 => stack::build_dup_op(&ctx, current, 4)?,
+                Dup5 => stack::build_dup_op(&ctx, current, 5)?,
+                Dup6 => stack::build_dup_op(&ctx, current, 6)?,
+                Dup7 => stack::build_dup_op(&ctx, current, 7)?,
+                Dup8 => stack::build_dup_op(&ctx, current, 8)?,
+                Dup9 => stack::build_dup_op(&ctx, current, 9)?,
+                Dup10 => stack::build_dup_op(&ctx, current, 10)?,
+                Dup11 => stack::build_dup_op(&ctx, current, 11)?,
+                Dup12 => stack::build_dup_op(&ctx, current, 12)?,
+                Dup13 => stack::build_dup_op(&ctx, current, 13)?,
+                Dup14 => stack::build_dup_op(&ctx, current, 14)?,
+                Dup15 => stack::build_dup_op(&ctx, current, 15)?,
+                Dup16 => stack::build_dup_op(&ctx, current, 16)?,
+                Iszero => arithmetic::iszero_op(&ctx, current)?,
+                Add => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Sub => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Mul => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Div => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Sdiv => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Mod => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Smod => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Shl => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Shr => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Sar => arithmetic::build_arithmetic_op(&ctx, current)?,
+                And => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Or => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Xor => arithmetic::build_arithmetic_op(&ctx, current)?,
+                Exp => arithmetic::build_exp_op(&ctx, current)?,
+                Eq => arithmetic::build_cmp_op(&ctx, current, IntPredicate::EQ)?,
+                Lt => arithmetic::build_cmp_op(&ctx, current, IntPredicate::ULT)?,
+                Gt => arithmetic::build_cmp_op(&ctx, current, IntPredicate::UGT)?,
+                Slt => arithmetic::build_cmp_op(&ctx, current, IntPredicate::SLT)?,
+                Sgt => arithmetic::build_cmp_op(&ctx, current, IntPredicate::SGT)?,
+                Not => arithmetic::build_not_op(&ctx, current)?,
+                Addmod => arithmetic::build_mod_op(&ctx, current)?,
+                Mulmod => arithmetic::build_mod_op(&ctx, current)?,
+                Signextend => arithmetic::build_signextend_op(&ctx, current)?,
+                GasLimit => BlockContext::build_get_gas_limit(&ctx, current)?,
+                BaseFee => BlockContext::build_get_basefee(&ctx, current)?,
+                PrevRandao => BlockContext::build_get_randao(&ctx, current)?,
+                Timestamp => BlockContext::build_get_timestamp(&ctx, current)?,
+                Coinbase => BlockContext::build_get_coinbase(&ctx, current)?,
+                Number => BlockContext::build_get_number(&ctx, current)?,
+                //AugmentedPushJump(_, val) => {
+                //    build_augmented_jump!(ctx, book, code, this, end, instructions, val)
+                //}
+                //AugmentedPushJumpi(_, val) => {
+                //    build_augmented_jumpi!(ctx, book, code, this, next, end, instructions, val)
+                //}
                 _ => {
-                    panic!("Op not implemented: {:?}", op);
+                    panic!("Op not implemented: {:?}", current.op());
                 }
             };
-
-            ctx.builder.build_unconditional_branch(next.block)?;
-            next.add_incoming(&book, &this);
         }
 
         // OUTPUT LLVM

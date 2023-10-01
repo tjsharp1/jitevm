@@ -1,4 +1,5 @@
 use crate::jit::{
+    cursor::CurrentInstruction,
     error::JitEvmEngineError,
     stack::{build_stack_inc, build_stack_pop},
     types::JitTypes,
@@ -118,11 +119,13 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub fn build_sha3(
+    pub(crate) fn build_sha3<'a>(
         &self,
         ctx: &OperationsContext<'ctx>,
-        book: JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let (book, offset) = build_stack_pop!(ctx, book);
         let (book, size) = build_stack_pop!(ctx, book);
 
@@ -143,15 +146,19 @@ impl<'ctx> HostFunctions<'ctx> {
             ],
             "",
         )?;
+        let book = build_stack_inc!(ctx, book);
 
-        Ok(build_stack_inc!(ctx, book))
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_sload(
+    pub(crate) fn build_sload<'a>(
         &self,
         ctx: &OperationsContext<'ctx>,
-        book: JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let _retval = ctx
             .builder
             .build_call(
@@ -164,14 +171,17 @@ impl<'ctx> HostFunctions<'ctx> {
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
 
-        Ok(book)
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 
-    pub fn build_sstore(
+    pub(crate) fn build_sstore<'a>(
         &self,
         ctx: &OperationsContext<'ctx>,
-        book: JitEvmEngineBookkeeping<'ctx>,
-    ) -> Result<JitEvmEngineBookkeeping<'ctx>, JitEvmEngineError> {
+        current: &CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = current.book();
+
         let _retval = ctx
             .builder
             .build_call(
@@ -186,7 +196,8 @@ impl<'ctx> HostFunctions<'ctx> {
         let (book, _) = build_stack_pop!(ctx, book);
         let (book, _) = build_stack_pop!(ctx, book);
 
-        Ok(book)
+        jump_next!(book, ctx, current);
+        Ok(())
     }
 }
 
