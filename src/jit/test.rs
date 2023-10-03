@@ -1,14 +1,17 @@
 use crate::{
     code::EvmOp,
-    jit::{JitContractBuilder, JitEvmExecutionContext},
+    jit::{JitContractBuilder, JitEvmEngineError, JitEvmExecutionContext},
 };
 use paste::paste;
 use primitive_types::{H160, H256, U256};
-use rand::{Rng, RngCore};
+use rand::{prelude::SliceRandom, Rng, RngCore};
 use sha3::{Digest, Keccak256};
 use std::collections::{HashMap, HashSet};
 
-fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
+fn test_jit(
+    ops: Vec<EvmOp>,
+    execution_context: &mut JitEvmExecutionContext,
+) -> Result<(), JitEvmEngineError> {
     use crate::code::EvmCode;
     use inkwell::context::Context;
 
@@ -17,13 +20,13 @@ fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
         .expect("Could not build jit contract")
         .debug_ir("jit_test.ll")
         .debug_asm("jit_test.asm")
-        .build(EvmCode { ops: ops.clone() }.index())
-        .unwrap();
+        .build(EvmCode { ops: ops.clone() }.index())?;
     // TODO: this return ptr should be a data structure with final state info?
     let ret = contract
         .call(execution_context)
         .expect("Contract call failed");
     assert_eq!(ret, 0);
+    Ok(())
 }
 
 macro_rules! check_context {
@@ -45,7 +48,7 @@ macro_rules! check_context {
             ops.push(EvmOp::Push(32, U256::zero()));
             ops.push(EvmOp::Mstore);
 
-            test_jit(ops, &mut context);
+            test_jit(ops, &mut context).expect("Contract build failed");
 
             let JitEvmExecutionContext {
                 storage, memory, ..
@@ -144,7 +147,311 @@ fn operations_jit_test_stop() {
         ops.push(EvmOp::Push(32, U256::zero()));
         ops.push(EvmOp::Sstore);
 
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
+
+        let JitEvmExecutionContext { storage, .. } = execution_context;
+
+        let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+        let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+        let diff = expected_keys.symmetric_difference(&actual_keys).count();
+        assert_eq!(diff, 0);
+
+        for (key, value) in expected_store.iter() {
+            let stored = *storage.get(key).expect("Storage should have item");
+            assert_eq!(*value, stored);
+        }
+    }
+}
+
+#[test]
+fn operations_test_jump() {
+    for _ in 0..1000 {
+        let mut execution_context = JitEvmExecutionContext::new();
+        let jumpdest_offset = 0x20;
+
+        let mut expected_store = HashMap::new();
+        let mut ops = Vec::new();
+
+        ops.push(EvmOp::Push(32, U256::from(jumpdest_offset)));
+        ops.push(EvmOp::Mload);
+        ops.push(EvmOp::Jump);
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Push(32, U256::from(0)));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Sstore);
+
+        let bytes = ops.iter().fold(0usize, |a, op| a + op.len());
+        let jumpdest = U256::from(bytes);
+
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Push(32, U256::from(1)));
+
+        let mut slice = &mut execution_context.memory[jumpdest_offset..jumpdest_offset + 0x20];
+        jumpdest.to_big_endian(&mut slice);
+
+        let result = test_jit(ops.clone(), &mut execution_context);
+        assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(2)));
+
+        let key0 = U256::from(0);
+        let value0 = U256::from(9);
+        let key1 = U256::from(1);
+        let value1 = U256::from(90);
+
+        expected_store.insert(key0, value0);
+        expected_store.insert(key1, value1);
+
+        // remove the ops that should've been jumpdest above
+        ops.pop();
+        ops.pop();
+        ops.push(EvmOp::Jumpdest);
+        ops.push(EvmOp::Push(32, value0));
+        ops.push(EvmOp::Push(32, key0));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, value1));
+        ops.push(EvmOp::Push(32, key1));
+        ops.push(EvmOp::Sstore);
+
+        let result = test_jit(ops.clone(), &mut execution_context);
+        assert!(result.is_ok());
+
+        let JitEvmExecutionContext { storage, .. } = execution_context;
+
+        let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+        let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+        let diff = expected_keys.symmetric_difference(&actual_keys).count();
+        assert_eq!(diff, 0);
+
+        for (key, value) in expected_store.iter() {
+            let stored = *storage.get(key).expect("Storage should have item");
+            assert_eq!(*value, stored);
+        }
+    }
+}
+
+#[test]
+fn operations_test_jumpi() {
+    for _ in 0..1000 {
+        let mut execution_context = JitEvmExecutionContext::new();
+        let jumpdest_offset = 0x20;
+
+        let mut expected_store = HashMap::new();
+        let mut ops = Vec::new();
+
+        let zero = U256::zero();
+        let val = rand::thread_rng().gen::<[u8; 32]>();
+        let nonzero = U256::from_big_endian(&val);
+        let choices = [zero, nonzero];
+        let condition = choices
+            .choose(&mut rand::thread_rng())
+            .expect("Should make random choice");
+        let key0_branch0 = U256::from(0);
+        let value0_branch0 = U256::from(1);
+        let key1_branch0 = U256::from(1);
+        let value1_branch0 = U256::from(8);
+
+        ops.push(EvmOp::Push(32, *condition));
+        ops.push(EvmOp::Push(32, U256::from(jumpdest_offset)));
+        ops.push(EvmOp::Mload);
+        ops.push(EvmOp::Jumpi);
+        ops.push(EvmOp::Push(32, value0_branch0));
+        ops.push(EvmOp::Push(32, key0_branch0));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, value1_branch0));
+        ops.push(EvmOp::Push(32, key1_branch0));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Stop);
+
+        let bytes = ops.iter().fold(0usize, |a, op| a + op.len());
+        let jumpdest = U256::from(bytes);
+
+        // push a couple non-jumpdest instructions, to check jumpdest error
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Push(32, U256::from(1)));
+
+        let mut slice = &mut execution_context.memory[jumpdest_offset..jumpdest_offset + 0x20];
+        jumpdest.to_big_endian(&mut slice);
+
+        let result = test_jit(ops.clone(), &mut execution_context);
+        assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(3)));
+
+        let key0_branch1 = U256::from(0);
+        let value0_branch1 = U256::from(9);
+        let key1_branch1 = U256::from(1);
+        let value1_branch1 = U256::from(90);
+
+        if *condition == U256::zero() {
+            expected_store.insert(key0_branch0, value0_branch0);
+            expected_store.insert(key1_branch0, value1_branch0);
+        } else {
+            expected_store.insert(key0_branch1, value0_branch1);
+            expected_store.insert(key1_branch1, value1_branch1);
+        }
+
+        // remove the ops that should've been jumpdest above
+        ops.pop();
+        ops.pop();
+        ops.push(EvmOp::Jumpdest);
+        ops.push(EvmOp::Push(32, value0_branch1));
+        ops.push(EvmOp::Push(32, key0_branch1));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, value1_branch1));
+        ops.push(EvmOp::Push(32, key1_branch1));
+        ops.push(EvmOp::Sstore);
+
+        let result = test_jit(ops.clone(), &mut execution_context);
+        assert!(result.is_ok());
+
+        let JitEvmExecutionContext { storage, .. } = execution_context;
+
+        let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+        let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+        let diff = expected_keys.symmetric_difference(&actual_keys).count();
+        assert_eq!(diff, 0);
+
+        for (key, value) in expected_store.iter() {
+            let stored = *storage.get(key).expect("Storage should have item");
+            assert_eq!(*value, stored);
+        }
+    }
+}
+
+#[test]
+fn operations_test_augmented_jump() {
+    let mut execution_context = JitEvmExecutionContext::new();
+
+    let mut expected_store = HashMap::new();
+    let mut ops = Vec::new();
+
+    ops.push(EvmOp::Push(32, U256::zero()));
+    ops.push(EvmOp::Jump);
+    ops.push(EvmOp::Push(32, U256::from(1)));
+    ops.push(EvmOp::Push(32, U256::from(0)));
+    ops.push(EvmOp::Sstore);
+    ops.push(EvmOp::Push(32, U256::from(1)));
+    ops.push(EvmOp::Push(32, U256::from(1)));
+    ops.push(EvmOp::Sstore);
+
+    let bytes = ops.iter().fold(0usize, |a, op| a + op.len());
+    let jumpdest = U256::from(bytes);
+
+    ops[0] = EvmOp::Push(32, jumpdest);
+
+    ops.push(EvmOp::Push(32, U256::from(1)));
+    ops.push(EvmOp::Push(32, U256::from(1)));
+
+    let result = test_jit(ops.clone(), &mut execution_context);
+    assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(1)));
+
+    let key0 = U256::from(0);
+    let value0 = U256::from(9);
+    let key1 = U256::from(1);
+    let value1 = U256::from(90);
+
+    expected_store.insert(key0, value0);
+    expected_store.insert(key1, value1);
+
+    // remove the ops that should've been jumpdest above
+    ops.pop();
+    ops.pop();
+    ops.push(EvmOp::Jumpdest);
+    ops.push(EvmOp::Push(32, value0));
+    ops.push(EvmOp::Push(32, key0));
+    ops.push(EvmOp::Sstore);
+    ops.push(EvmOp::Push(32, value1));
+    ops.push(EvmOp::Push(32, key1));
+    ops.push(EvmOp::Sstore);
+
+    let result = test_jit(ops.clone(), &mut execution_context);
+    assert!(result.is_ok());
+
+    let JitEvmExecutionContext { storage, .. } = execution_context;
+
+    let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
+    let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+
+    let diff = expected_keys.symmetric_difference(&actual_keys).count();
+    assert_eq!(diff, 0);
+
+    for (key, value) in expected_store.iter() {
+        let stored = *storage.get(key).expect("Storage should have item");
+        assert_eq!(*value, stored);
+    }
+}
+
+#[test]
+fn operations_test_augmented_jumpi() {
+    for _ in 0..1000 {
+        let mut execution_context = JitEvmExecutionContext::new();
+
+        let mut expected_store = HashMap::new();
+        let mut ops = Vec::new();
+
+        let zero = U256::zero();
+        let val = rand::thread_rng().gen::<[u8; 32]>();
+        let nonzero = U256::from_big_endian(&val);
+        let choices = [zero, nonzero];
+        let condition = choices
+            .choose(&mut rand::thread_rng())
+            .expect("Should make random choice");
+        let key0_branch0 = U256::from(0);
+        let value0_branch0 = U256::from(1);
+        let key1_branch0 = U256::from(1);
+        let value1_branch0 = U256::from(8);
+
+        ops.push(EvmOp::Push(32, *condition));
+        ops.push(EvmOp::Push(32, U256::zero()));
+        ops.push(EvmOp::Jumpi);
+        ops.push(EvmOp::Push(32, value0_branch0));
+        ops.push(EvmOp::Push(32, key0_branch0));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, value1_branch0));
+        ops.push(EvmOp::Push(32, key1_branch0));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Stop);
+
+        let bytes = ops.iter().fold(0usize, |a, op| a + op.len());
+        let jumpdest = U256::from(bytes);
+
+        ops[1] = EvmOp::Push(32, jumpdest);
+
+        // push a couple non-jumpdest instructions, to check jumpdest error
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Push(32, U256::from(1)));
+
+        let result = test_jit(ops.clone(), &mut execution_context);
+        assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(2)));
+
+        let key0_branch1 = U256::from(0);
+        let value0_branch1 = U256::from(9);
+        let key1_branch1 = U256::from(1);
+        let value1_branch1 = U256::from(90);
+
+        if *condition == U256::zero() {
+            expected_store.insert(key0_branch0, value0_branch0);
+            expected_store.insert(key1_branch0, value1_branch0);
+        } else {
+            expected_store.insert(key0_branch1, value0_branch1);
+            expected_store.insert(key1_branch1, value1_branch1);
+        }
+
+        // remove the ops that should've been jumpdest above
+        ops.pop();
+        ops.pop();
+        ops.push(EvmOp::Jumpdest);
+        ops.push(EvmOp::Push(32, value0_branch1));
+        ops.push(EvmOp::Push(32, key0_branch1));
+        ops.push(EvmOp::Sstore);
+        ops.push(EvmOp::Push(32, value1_branch1));
+        ops.push(EvmOp::Push(32, key1_branch1));
+        ops.push(EvmOp::Sstore);
+
+        let result = test_jit(ops.clone(), &mut execution_context);
+        assert!(result.is_ok());
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -192,7 +499,7 @@ fn operations_jit_test_sha3() {
             offset += r;
         }
 
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -232,7 +539,7 @@ fn operations_jit_test_sstore() {
         }
 
         let mut execution_context = JitEvmExecutionContext::new();
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -275,7 +582,7 @@ fn operations_jit_test_sload() {
             ops.push(EvmOp::Mstore);
         }
 
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -317,7 +624,7 @@ fn operations_jit_test_mload() {
             ops.push(EvmOp::Mload);
         }
 
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
 
         let JitEvmExecutionContext { stack, .. } = execution_context;
 
@@ -354,7 +661,7 @@ fn operations_jit_test_mstore8() {
             ops.push(EvmOp::Mstore8);
         }
 
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -391,7 +698,7 @@ fn operations_jit_test_mstore() {
             ops.push(EvmOp::Mstore);
         }
 
-        test_jit(ops, &mut execution_context);
+        test_jit(ops, &mut execution_context).expect("Contract build failed");
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -419,7 +726,7 @@ macro_rules! test_op1 {
                     test_jit(vec![
                         Push(32, a),
                         $evmop,
-                    ], &mut ctx);
+                    ], &mut ctx).expect("Contract build failed");
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
                     let d_ = $opname(a);
@@ -457,7 +764,7 @@ macro_rules! test_op2 {
                         Push(32, b),
                         Push(32, a),
                         $evmop,
-                    ], &mut ctx);
+                    ], &mut ctx).expect("Contract build failed");
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
                     let d_ = $opname(a, b);
@@ -499,7 +806,7 @@ macro_rules! test_op2_small {
                         Push(32, b),
                         Push(32, a),
                         $evmop,
-                    ], &mut ctx);
+                    ], &mut ctx).expect("Contract build failed");
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
                     let d = stack[0];
@@ -548,7 +855,7 @@ macro_rules! test_op_dup {
                     ops.push($evmop);
                     let mut ctx = JitEvmExecutionContext::new();
 
-                    test_jit(ops.clone(), &mut ctx);
+                    test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
                     let d = &stack[..original_stack.len() + 1];
@@ -589,7 +896,7 @@ macro_rules! test_op_swap {
                     ops.push($evmop);
 
                     let mut ctx = JitEvmExecutionContext::new();
-                    test_jit(ops.clone(), &mut ctx);
+                    test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = &stack[..original_stack.len()];
@@ -635,7 +942,7 @@ macro_rules! test_op3 {
                         Push(32, b),
                         Push(32, a),
                         $evmop,
-                    ], &mut ctx);
+                    ], &mut ctx).expect("Contract build failed");
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
                     let d_ = $opname(a, b, c);
@@ -727,6 +1034,8 @@ test_op_swap!(swap13, EvmOp::Swap13, 13);
 test_op_swap!(swap14, EvmOp::Swap14, 14);
 test_op_swap!(swap15, EvmOp::Swap15, 15);
 test_op_swap!(swap16, EvmOp::Swap16, 16);
+
+// TODO: remaining instructions
 //Byte,
 //Address,
 //Balance,
@@ -749,12 +1058,9 @@ test_op_swap!(swap16, EvmOp::Swap16, 16);
 //SelfBalance,
 //BaseFee,
 //Pop,
-//Jump,
-//Jumpi,
 //Pc,
 //Msize,
 //Gas,
-//Jumpdest,
 //Log0,
 //Log1,
 //Log2,
@@ -770,6 +1076,3 @@ test_op_swap!(swap16, EvmOp::Swap16, 16);
 //Revert,
 //Invalid,
 //Selfdestruct,
-
-//AugmentedPushJump(usize, U256),
-//AugmentedPushJumpi(usize, U256),

@@ -9,8 +9,7 @@ use inkwell::context::Context;
 use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
 use inkwell::targets::{InitializationConfig, Target};
-use inkwell::values::{BasicValue, IntValue, PhiValue};
-use inkwell::AddressSpace;
+use inkwell::values::{IntValue, PhiValue};
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
 
@@ -298,12 +297,8 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Timestamp => BlockContext::build_get_timestamp(&ctx, current)?,
                 Coinbase => BlockContext::build_get_coinbase(&ctx, current)?,
                 Number => BlockContext::build_get_number(&ctx, current)?,
-                //AugmentedPushJump(_, val) => {
-                //    build_augmented_jump!(ctx, book, code, this, end, instructions, val)
-                //}
-                //AugmentedPushJumpi(_, val) => {
-                //    build_augmented_jumpi!(ctx, book, code, this, next, end, instructions, val)
-                //}
+                AugmentedPushJump(_, val) => jump::build_augmented_jump_op(&ctx, current, val)?,
+                AugmentedPushJumpi(_, val) => jump::build_augmented_jumpi_op(&ctx, current, val)?,
                 _ => {
                     panic!("Op not implemented: {:?}", current.op());
                 }

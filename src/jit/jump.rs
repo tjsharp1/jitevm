@@ -3,6 +3,7 @@ use crate::jit::{
     cursor::CurrentInstruction, JitEvmEngineError, JitEvmEngineSimpleBlock, OperationsContext,
 };
 use inkwell::{AddressSpace, IntPredicate};
+use primitive_types::U256;
 
 macro_rules! jump_next {
     ($book:ident, $ctx:ident, $current:ident) => {{
@@ -36,16 +37,12 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
     let code = current.code();
-    let end = current.end();
     let this = current.block();
 
     let (book, target) = build_stack_pop!(ctx, book);
 
     if code.jumpdests.is_empty() {
-        // there are no valid jump targets, this Jump has to fail!
-        // TODO: should this be the error block?
-        ctx.builder.build_unconditional_branch(end.block)?;
-        end.add_incoming(&book, this);
+        return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
     } else {
         let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
@@ -114,7 +111,6 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
     let code = current.code();
-    let end = current.end();
     let this = current.block();
     let next = current.next();
 
@@ -122,9 +118,7 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
     let (book, val) = build_stack_pop!(ctx, book);
 
     if code.jumpdests.is_empty() {
-        // there are no valid jump targets, this Jumpi has to fail!
-        ctx.builder.build_unconditional_branch(end.block)?;
-        end.add_incoming(&book, this);
+        return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
     } else {
         let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
@@ -194,53 +188,61 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
     Ok(())
 }
 
-macro_rules! build_jumpi {
-    ($ctx:ident, $book:ident, $code:ident, $this:ident, $next:ident, $end:ident, $instructions:ident, $error_jumpdest:ident, $i:ident, $op:ident) => {{}};
+pub(crate) fn build_augmented_jump_op<'a, 'ctx>(
+    ctx: &OperationsContext<'ctx>,
+    current: &CurrentInstruction<'a, 'ctx>,
+    val: U256,
+) -> Result<(), JitEvmEngineError> {
+    let book = current.book();
+    let code = current.code();
+    let this = current.block();
+    let instructions = current.instructions();
+
+    if code.jumpdests.is_empty() {
+        return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
+    } else {
+        // TODO: need to insert a run-time check if the target is a valid jump-dest!!
+        // retrieve the corresponding jump target (panic if not a valid jump target) ...
+        let jmp_i = code.target2opidx[&val];
+        // ... and jump to there!
+        ctx.builder
+            .build_unconditional_branch(instructions[jmp_i].block)?;
+        instructions[jmp_i].add_incoming(&book, this);
+    }
+    Ok(())
 }
 
-macro_rules! build_augmented_jump {
-    ($ctx:ident, $book:ident, $code:ident, $this:ident, $end:ident, $instructions:ident, $val:ident) => {{
-        if $code.jumpdests.is_empty() {
-            // there are no valid jump targets, this Jump has to fail!
-            $ctx.builder.build_unconditional_branch($end.block)?;
-            $end.add_incoming(&$book, &$this);
-        } else {
-            // retrieve the corresponding jump target (panic if not a valid jump target) ...
-            let jmp_i = $code.target2opidx[$val];
-            // ... and jump to there!
-            $ctx.builder
-                .build_unconditional_branch($instructions[jmp_i].block)?;
-            $instructions[jmp_i].add_incoming(&$book, &$this);
-        }
+pub(crate) fn build_augmented_jumpi_op<'a, 'ctx>(
+    ctx: &OperationsContext<'ctx>,
+    current: &CurrentInstruction<'a, 'ctx>,
+    val: U256,
+) -> Result<(), JitEvmEngineError> {
+    let book = current.book();
+    let code = current.code();
+    let this = current.block();
+    let next = current.next();
+    let instructions = current.instructions();
 
-        continue; // skip auto-generated jump to next instruction
-    }};
-}
+    let (book, condition) = build_stack_pop!(ctx, book);
 
-macro_rules! build_augmented_jumpi {
-    ($ctx:ident, $book:ident, $code:ident, $this:ident, $next:ident, $end:ident, $instructions:ident, $val:ident) => {{
-        let (book, condition) = build_stack_pop!($ctx, $book);
+    if code.jumpdests.is_empty() {
+        return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
+    } else {
+        // TODO: need to insert a run-time check if the target is a valid jump-dest!!
+        // retrieve the corresponding jump target (panic if not a valid jump target) ...
+        let jmp_i = code.target2opidx[&val];
+        // ... and jump to there (conditionally)!
+        let cmp = ctx.builder.build_int_compare(
+            IntPredicate::EQ,
+            ctx.types.type_stackel.const_int(0, false),
+            condition,
+            "",
+        )?;
+        ctx.builder
+            .build_conditional_branch(cmp, next.block, instructions[jmp_i].block)?;
+        next.add_incoming(&book, this);
+        instructions[jmp_i].add_incoming(&book, this);
+    }
 
-        if $code.jumpdests.is_empty() {
-            // there are no valid jump targets, this Jumpi has to fail!
-            $ctx.builder.build_unconditional_branch($end.block)?;
-            $end.add_incoming(&book, &$this);
-        } else {
-            // retrieve the corresponding jump target (panic if not a valid jump target) ...
-            let jmp_i = $code.target2opidx[$val];
-            // ... and jump to there (conditionally)!
-            let cmp = $ctx.builder.build_int_compare(
-                IntPredicate::EQ,
-                $ctx.types.type_stackel.const_int(0, false),
-                condition,
-                "",
-            )?;
-            $ctx.builder
-                .build_conditional_branch(cmp, $next.block, $instructions[jmp_i].block)?;
-            $next.add_incoming(&book, &$this);
-            $instructions[jmp_i].add_incoming(&book, &$this);
-        }
-
-        continue; // skip auto-generated jump to next instruction
-    }};
+    Ok(())
 }

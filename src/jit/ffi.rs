@@ -3,7 +3,7 @@ use crate::jit::{
     error::JitEvmEngineError,
     stack::{build_stack_inc, build_stack_pop},
     types::JitTypes,
-    JitEvmEngineBookkeeping, JitEvmPtrs, OperationsContext,
+    JitEvmPtrs, OperationsContext,
 };
 use hex_literal::hex;
 use inkwell::{

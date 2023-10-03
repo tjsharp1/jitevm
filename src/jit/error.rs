@@ -1,7 +1,7 @@
 use inkwell::{builder::BuilderError, execution_engine::FunctionLookupError, support::LLVMString};
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Eq, PartialEq)]
 pub enum JitEvmEngineError {
     #[error("FunctionLookupError: {0:?}")]
     FunctionLookupError(#[from] FunctionLookupError),
@@ -15,6 +15,8 @@ pub enum JitEvmEngineError {
     NoInstructionsToRender,
     #[error("StringError: {0:?}")]
     UnknownStringError(String),
+    #[error("Jump at opcode index {0} has no valid jump destinations!")]
+    NoValidJumpDestinations(usize),
 }
 
 impl From<String> for JitEvmEngineError {
