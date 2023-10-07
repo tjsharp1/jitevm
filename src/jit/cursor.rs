@@ -21,11 +21,13 @@ pub trait LendingIterator: for<'this> LendingIteratorLifetime<'this> {
 
 pub(crate) struct CurrentInstruction<'a, 'ctx> {
     idx: usize,
+    current_block: Option<JitEvmEngineSimpleBlock<'ctx>>,
     render: &'a InstructionCursor<'ctx>,
 }
 
 impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
     pub fn step(&mut self) -> bool {
+        self.current_block = None;
         self.idx += 1;
         self.idx < self.render.instructions.len()
     }
@@ -35,7 +37,13 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
     }
 
     pub fn block(&self) -> &JitEvmEngineSimpleBlock<'ctx> {
-        &self.render.instructions[self.idx]
+        self.current_block
+            .as_ref()
+            .unwrap_or(&self.render.instructions[self.idx])
+    }
+
+    pub fn update_current_block(&mut self, block: JitEvmEngineSimpleBlock<'ctx>) {
+        self.current_block = Some(block);
     }
 
     pub fn next(&self) -> &JitEvmEngineSimpleBlock<'ctx> {
@@ -84,6 +92,7 @@ impl<'a, 'ctx> Iter<'a, 'ctx> {
             init: true,
             current: CurrentInstruction {
                 idx: 0,
+                current_block: None,
                 render: &render,
             },
         }
@@ -91,17 +100,17 @@ impl<'a, 'ctx> Iter<'a, 'ctx> {
 }
 
 impl<'this, 'a, 'ctx> LendingIteratorLifetime<'this> for Iter<'a, 'ctx> {
-    type Item = &'this CurrentInstruction<'a, 'ctx>;
+    type Item = &'this mut CurrentInstruction<'a, 'ctx>;
 }
 
 impl<'a, 'ctx> LendingIterator for Iter<'a, 'ctx> {
     fn next(&mut self) -> Option<<Self as LendingIteratorLifetime<'_>>::Item> {
         if self.init {
             self.init = false;
-            Some(&self.current)
+            Some(&mut self.current)
         } else {
             if self.current.step() {
-                Some(&self.current)
+                Some(&mut self.current)
             } else {
                 None
             }
@@ -150,7 +159,7 @@ impl<'ctx> InstructionCursor<'ctx> {
             )?;
             let sp_int = ctx
                 .builder
-                .build_load(execution_context_ptr, "")?
+                .build_load(ctx.types.type_ptrint, execution_context_ptr, "")?
                 .into_int_value();
             let max_offset = (EVM_STACK_SIZE - 1) as u64 * EVM_STACK_ELEMENT_SIZE;
             let sp_max = ctx.builder.build_int_add(
@@ -169,7 +178,10 @@ impl<'ctx> InstructionCursor<'ctx> {
                 "",
             )?;
 
-            let mem = ctx.builder.build_load(mem_ptr, "")?.into_int_value();
+            let mem = ctx
+                .builder
+                .build_load(ctx.types.type_ptrint, mem_ptr, "")?
+                .into_int_value();
             JitEvmEngineBookkeeping {
                 execution_context: execution_context,
                 sp_min: sp_int,

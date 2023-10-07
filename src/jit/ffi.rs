@@ -1,7 +1,7 @@
 use crate::jit::{
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
-    stack::{build_stack_inc, build_stack_pop},
+    stack::{build_stack_check, build_stack_inc, build_stack_pop},
     types::JitTypes,
     JitEvmPtrs, OperationsContext,
 };
@@ -122,9 +122,10 @@ impl<'ctx> HostFunctions<'ctx> {
     pub(crate) fn build_sha3<'a>(
         &self,
         ctx: &OperationsContext<'ctx>,
-        current: &CurrentInstruction<'a, 'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         let book = current.book();
+        build_stack_check!(ctx, current, book, 2, 0);
 
         let (book, offset) = build_stack_pop!(ctx, book);
         let (book, size) = build_stack_pop!(ctx, book);
@@ -148,16 +149,19 @@ impl<'ctx> HostFunctions<'ctx> {
         )?;
         let book = build_stack_inc!(ctx, book);
 
-        jump_next!(book, ctx, current);
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
         Ok(())
     }
 
     pub(crate) fn build_sload<'a>(
         &self,
         ctx: &OperationsContext<'ctx>,
-        current: &CurrentInstruction<'a, 'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         let book = current.book();
+        build_stack_check!(ctx, current, book, 1, 0);
 
         let _retval = ctx
             .builder
@@ -171,16 +175,19 @@ impl<'ctx> HostFunctions<'ctx> {
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
 
-        jump_next!(book, ctx, current);
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
         Ok(())
     }
 
     pub(crate) fn build_sstore<'a>(
         &self,
         ctx: &OperationsContext<'ctx>,
-        current: &CurrentInstruction<'a, 'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         let book = current.book();
+        build_stack_check!(ctx, current, book, 2, 0);
 
         let _retval = ctx
             .builder
@@ -196,7 +203,9 @@ impl<'ctx> HostFunctions<'ctx> {
         let (book, _) = build_stack_pop!(ctx, book);
         let (book, _) = build_stack_pop!(ctx, book);
 
-        jump_next!(book, ctx, current);
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
         Ok(())
     }
 }

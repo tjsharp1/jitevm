@@ -1,4 +1,4 @@
-use crate::jit::stack::{build_stack_pop, build_stack_push};
+use crate::jit::stack::{build_stack_check, build_stack_pop, build_stack_push};
 use crate::jit::{
     cursor::CurrentInstruction, EvmOp, JitEvmEngineError, JitEvmEngineSimpleBlock,
     OperationsContext,
@@ -7,11 +7,12 @@ use inkwell::{AddressSpace, IntPredicate};
 
 pub(crate) fn iszero_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
-    let this = current.block();
+    build_stack_check!(ctx, current, book, 1, 0);
     let next = current.next();
+    let this = current.block();
 
     let (book, val) = build_stack_pop!(ctx, book);
     let cmp = ctx.builder.build_int_compare(
@@ -65,9 +66,10 @@ pub(crate) fn iszero_op<'a, 'ctx>(
 
 pub(crate) fn build_arithmetic_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
 
     let (book, a) = build_stack_pop!(ctx, book);
     let (book, b) = build_stack_pop!(ctx, book);
@@ -88,18 +90,34 @@ pub(crate) fn build_arithmetic_op<'a, 'ctx>(
         _ => panic!("Invalid opcode for arithmetic operations!"),
     };
 
+    let d = match current.op() {
+        EvmOp::Smod | EvmOp::Mod => {
+            let const_0 = ctx.types.type_stackel.const_int(0, false);
+            let cmp = ctx
+                .builder
+                .build_int_compare(IntPredicate::EQ, const_0, b, "")?;
+            ctx.builder
+                .build_select(cmp, const_0, d, "")?
+                .into_int_value()
+        }
+        _ => d,
+    };
+
     let book = build_stack_push!(ctx, book, d);
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
 
     Ok(())
 }
 
 pub(crate) fn build_cmp_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
     predicate: IntPredicate,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
     let this = current.block();
     let next = current.next();
 
@@ -151,9 +169,10 @@ pub(crate) fn build_cmp_op<'a, 'ctx>(
 
 pub(crate) fn build_signextend_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
     let this = current.block();
     let next = current.next();
 
@@ -208,9 +227,10 @@ pub(crate) fn build_signextend_op<'a, 'ctx>(
 
 pub(crate) fn build_mod_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 3, 0);
 
     let (book, a) = build_stack_pop!(ctx, book);
     let (book, b) = build_stack_pop!(ctx, book);
@@ -240,8 +260,17 @@ pub(crate) fn build_mod_op<'a, 'ctx>(
         .builder
         .build_int_cast(result, ctx.types.type_stackel, "")?;
 
+    let const_0 = ctx.types.type_stackel.const_int(0, false);
+    let cmp = ctx
+        .builder
+        .build_int_compare(IntPredicate::EQ, n, const_0, "")?;
+
+    let result = ctx.builder.build_select(cmp, const_0, result, "")?;
+
     let book = build_stack_push!(ctx, book, result);
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }
 
@@ -267,9 +296,10 @@ macro_rules! op2_i256_exp_bit {
 
 pub(crate) fn build_exp_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
     let this = current.block();
     let next = current.next();
 
@@ -381,14 +411,17 @@ pub(crate) fn build_exp_op<'a, 'ctx>(
 
 pub(crate) fn build_not_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 1, 0);
 
     let (book, a) = build_stack_pop!(ctx, book);
     let d = ctx.builder.build_not(a, "")?;
     let book = build_stack_push!(ctx, book, d);
 
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }

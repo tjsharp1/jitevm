@@ -11,7 +11,7 @@ bytes = { version = "1.1" }
 primitive-types = "0.11.1"
 eyre = "0.6.8"
 thiserror = "1.0.31"
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm14-0"] }
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master" }
 itertools = "0.10.3"
 revm = "1.7.0"
 
@@ -23,3 +23,7 @@ hex-literal = "0.4.1"
 
 [patch.crates-io]
 revm = { git = 'https://github.com/joachimneu/revm-hacking1' }
+
+[features]
+llvm14 = ["inkwell/llvm14-0"]
+llvm16 = ["inkwell/llvm16-0"]

@@ -1,17 +1,9 @@
-use crate::jit::stack::build_stack_pop;
+use crate::jit::stack::{build_stack_check, build_stack_pop};
 use crate::jit::{
     cursor::CurrentInstruction, JitEvmEngineError, JitEvmEngineSimpleBlock, OperationsContext,
 };
 use inkwell::{AddressSpace, IntPredicate};
 use primitive_types::U256;
-
-macro_rules! jump_next {
-    ($book:ident, $ctx:ident, $current:ident) => {{
-        $ctx.builder
-            .build_unconditional_branch($current.next().block)?;
-        $current.next().add_incoming(&$book, &$current.block());
-    }};
-}
 
 pub(crate) fn build_stop_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
@@ -27,15 +19,18 @@ pub(crate) fn build_jumpdest_op<'a, 'ctx>(
     current: &CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }
 
 pub(crate) fn build_jump_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 1, 0);
     let code = current.code();
     let this = current.block();
 
@@ -107,9 +102,10 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
 
 pub(crate) fn build_jumpi_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
     let code = current.code();
     let this = current.block();
     let next = current.next();
@@ -214,10 +210,11 @@ pub(crate) fn build_augmented_jump_op<'a, 'ctx>(
 
 pub(crate) fn build_augmented_jumpi_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 1, 0);
     let code = current.code();
     let this = current.block();
     let next = current.next();

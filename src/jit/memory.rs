@@ -1,4 +1,6 @@
-use crate::jit::stack::{build_stack_pop, build_stack_pop_vector, build_stack_push_vector};
+use crate::jit::stack::{
+    build_stack_check, build_stack_pop, build_stack_pop_vector, build_stack_push_vector,
+};
 use crate::jit::{
     cursor::CurrentInstruction, JitEvmEngineError, OperationsContext, EVM_JIT_STACK_ALIGN,
 };
@@ -7,9 +9,10 @@ use inkwell::{values::BasicValue, AddressSpace};
 // TODO: memory growth checks
 pub(crate) fn build_mstore_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
 
     let (book, offset) = build_stack_pop!(ctx, book);
     let (book, vec0, vec1) = build_stack_pop_vector!(ctx, book);
@@ -32,15 +35,18 @@ pub(crate) fn build_mstore_op<'a, 'ctx>(
         .build_store(dest_ptr, shuffled)?
         .set_alignment(1)?;
 
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }
 
 pub(crate) fn build_mstore8_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
 
     let (book, offset) = build_stack_pop!(ctx, book);
     let (book, value) = build_stack_pop!(ctx, book);
@@ -58,15 +64,18 @@ pub(crate) fn build_mstore8_op<'a, 'ctx>(
 
     ctx.builder.build_store(dest_ptr, value_casted)?;
 
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }
 
 pub(crate) fn build_mload_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let book = current.book();
+    build_stack_check!(ctx, current, book, 1, 0);
 
     let (book, offset) = build_stack_pop!(ctx, book);
     let casted = ctx
@@ -91,8 +100,14 @@ pub(crate) fn build_mload_op<'a, 'ctx>(
         "",
     )?;
 
-    let vec0 = ctx.builder.build_load(mem0_ptr, "")?.into_vector_value();
-    let vec1 = ctx.builder.build_load(mem1_ptr, "")?.into_vector_value();
+    let vec0 = ctx
+        .builder
+        .build_load(ctx.types.type_ivec, mem0_ptr, "")?
+        .into_vector_value();
+    let vec1 = ctx
+        .builder
+        .build_load(ctx.types.type_ivec, mem1_ptr, "")?
+        .into_vector_value();
 
     vec0.as_instruction_value()
         .ok_or(JitEvmEngineError::NoInstructionValue)?
@@ -107,6 +122,8 @@ pub(crate) fn build_mload_op<'a, 'ctx>(
 
     let book = build_stack_push_vector!(ctx, book, shuffled);
 
-    jump_next!(book, ctx, current);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }
