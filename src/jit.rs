@@ -45,6 +45,7 @@ pub struct JitEvmEngineBookkeeping<'ctx> {
     pub execution_context: IntValue<'ctx>,
     pub sp_min: IntValue<'ctx>,
     pub sp_max: IntValue<'ctx>,
+    pub gas_remaining: IntValue<'ctx>,
     pub sp: IntValue<'ctx>,
     pub mem: IntValue<'ctx>,
 }
@@ -52,6 +53,13 @@ pub struct JitEvmEngineBookkeeping<'ctx> {
 impl<'ctx> JitEvmEngineBookkeeping<'ctx> {
     pub fn update_sp(&self, sp: IntValue<'ctx>) -> Self {
         Self { sp, ..*self }
+    }
+
+    pub fn update_gas(&self, gas_remaining: IntValue<'ctx>) -> Self {
+        Self {
+            gas_remaining,
+            ..*self
+        }
     }
 }
 
@@ -61,6 +69,7 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
     pub phi_execution_context: PhiValue<'ctx>,
     pub phi_sp_min: PhiValue<'ctx>,
     pub phi_sp_max: PhiValue<'ctx>,
+    pub phi_gas_remaining: PhiValue<'ctx>,
     pub phi_sp: PhiValue<'ctx>,
     pub phi_mem: PhiValue<'ctx>,
 }
@@ -83,6 +92,9 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         let phi_sp_max = ctx
             .builder
             .build_phi(ctx.types.type_i64, &format!("sp_max{}", suffix))?;
+        let phi_gas_remaining = ctx
+            .builder
+            .build_phi(ctx.types.type_i64, &format!("gas_remaining{}", suffix))?;
         let phi_sp = ctx
             .builder
             .build_phi(ctx.types.type_i64, &format!("sp{}", suffix))?;
@@ -95,6 +107,7 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             phi_execution_context,
             phi_sp_min,
             phi_sp_max,
+            phi_gas_remaining,
             phi_sp,
             phi_mem,
         })
@@ -105,6 +118,7 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             execution_context: self.phi_execution_context.as_basic_value().into_int_value(),
             sp_min: self.phi_sp_min.as_basic_value().into_int_value(),
             sp_max: self.phi_sp_max.as_basic_value().into_int_value(),
+            gas_remaining: self.phi_gas_remaining.as_basic_value().into_int_value(),
             sp: self.phi_sp.as_basic_value().into_int_value(),
             mem: self.phi_mem.as_basic_value().into_int_value(),
         }
@@ -115,6 +129,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             .add_incoming(&[(&book.execution_context, *prev)]);
         self.phi_sp_min.add_incoming(&[(&book.sp_min, *prev)]);
         self.phi_sp_max.add_incoming(&[(&book.sp_max, *prev)]);
+        self.phi_gas_remaining
+            .add_incoming(&[(&book.gas_remaining, *prev)]);
         self.phi_sp.add_incoming(&[(&book.sp, *prev)]);
         self.phi_mem.add_incoming(&[(&book.mem, *prev)]);
     }
@@ -128,6 +144,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             .add_incoming(&[(&book.execution_context, prev.block)]);
         self.phi_sp_min.add_incoming(&[(&book.sp_min, prev.block)]);
         self.phi_sp_max.add_incoming(&[(&book.sp_max, prev.block)]);
+        self.phi_gas_remaining
+            .add_incoming(&[(&book.gas_remaining, prev.block)]);
         self.phi_sp.add_incoming(&[(&book.sp, prev.block)]);
         self.phi_mem.add_incoming(&[(&book.mem, prev.block)]);
     }
@@ -288,6 +306,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Slt => arithmetic::build_cmp_op(&ctx, current, IntPredicate::SLT)?,
                 Sgt => arithmetic::build_cmp_op(&ctx, current, IntPredicate::SGT)?,
                 Not => arithmetic::build_not_op(&ctx, current)?,
+                Byte => arithmetic::build_byte_op(&ctx, current)?,
                 Addmod => arithmetic::build_mod_op(&ctx, current)?,
                 Mulmod => arithmetic::build_mod_op(&ctx, current)?,
                 Signextend => arithmetic::build_signextend_op(&ctx, current)?,

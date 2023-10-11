@@ -64,6 +64,42 @@ pub(crate) fn iszero_op<'a, 'ctx>(
     Ok(())
 }
 
+pub(crate) fn build_byte_op<'a, 'ctx>(
+    ctx: &OperationsContext<'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
+) -> Result<(), JitEvmEngineError> {
+    let book = current.book();
+    build_stack_check!(ctx, current, book, 2, 0);
+
+    let (book, i) = build_stack_pop!(ctx, book);
+    let (book, x) = build_stack_pop!(ctx, book);
+
+    let bit_width = ctx.types.type_stackel.get_bit_width();
+    let bytes = bit_width / 8;
+
+    let const_0 = ctx.types.type_stackel.const_int(0, false);
+    let const_8 = ctx.types.type_stackel.const_int(8, false);
+    let const_248 = ctx.types.type_stackel.const_int(248, false);
+    let bytes_width = ctx.types.type_stackel.const_int(bytes as u64, false);
+
+    let cmp = ctx
+        .builder
+        .build_int_compare(IntPredicate::UGE, i, bytes_width, "")?;
+
+    let bit_shift = ctx.builder.build_int_mul(i, const_8, "")?;
+
+    let val = ctx.builder.build_left_shift(x, bit_shift, "")?;
+    let val = ctx.builder.build_right_shift(val, const_248, false, "")?;
+
+    let val = ctx.builder.build_select(cmp, const_0, val, "")?;
+
+    let book = build_stack_push!(ctx, book, val);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
+    Ok(())
+}
+
 pub(crate) fn build_arithmetic_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,

@@ -1,6 +1,6 @@
 use crate::jit::{
-    EvmOp, IndexedEvmCode, JitEvmEngineBookkeeping, JitEvmEngineError, JitEvmEngineSimpleBlock,
-    OperationsContext, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
+    context::TransactionContext, EvmOp, IndexedEvmCode, JitEvmEngineBookkeeping, JitEvmEngineError,
+    JitEvmEngineSimpleBlock, OperationsContext, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
 };
 use inkwell::AddressSpace;
 
@@ -178,14 +178,18 @@ impl<'ctx> InstructionCursor<'ctx> {
                 "",
             )?;
 
+            let gas_remaining = TransactionContext::gas_limit(&ctx, execution_context)?;
+
             let mem = ctx
                 .builder
                 .build_load(ctx.types.type_ptrint, mem_ptr, "")?
                 .into_int_value();
+
             JitEvmEngineBookkeeping {
                 execution_context: execution_context,
                 sp_min: sp_int,
                 sp_max: sp_max,
+                gas_remaining,
                 sp: sp_int,
                 mem,
                 // retval: retval

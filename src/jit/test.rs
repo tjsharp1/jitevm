@@ -9,6 +9,9 @@ use rand::{prelude::SliceRandom, Rng, RngCore};
 use sha3::{Digest, Keccak256};
 use std::collections::{HashMap, HashSet};
 
+mod i256;
+mod operations;
+
 fn test_jit(
     ops: Vec<EvmOp>,
     execution_context: &mut JitEvmExecutionContext,
@@ -34,7 +37,7 @@ macro_rules! expect_stack_overflow {
             fn [<operations_stack_overflow_ $fname>]() {
                 use crate::code::EvmOp::*;
 
-                let mut ops = vec![EvmOp::Push(32, U256::zero()); EVM_STACK_SIZE];
+                let mut ops = vec![Push(32, U256::zero()); EVM_STACK_SIZE];
 
                 for _ in 0..$stack_growth {
                     ops.push($evmop);
@@ -822,7 +825,7 @@ macro_rules! test_op1 {
             #[test]
             fn [<operations_jit_equivalence_ $fname>]() {
                 use crate::code::EvmOp::*;
-                use crate::operations;
+                use operations;
 
                 fn _test(a: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
@@ -861,7 +864,7 @@ macro_rules! test_op2 {
             #[test]
             fn [<operations_jit_equivalence_ $fname>]() {
                 use crate::code::EvmOp::*;
-                use crate::operations;
+                use operations;
 
                 fn _test(a: U256, b: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
@@ -905,7 +908,7 @@ macro_rules! test_op2_small {
             #[test]
             fn [<operations_jit_equivalence_ $fname>]() {
                 use crate::code::EvmOp::*;
-                use crate::operations;
+                use operations;
 
                 fn _test(a: U256, b: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
@@ -1047,7 +1050,7 @@ macro_rules! test_op3 {
             #[test]
             fn [<operations_jit_equivalence_ $fname>]() {
                 use crate::code::EvmOp::*;
-                use crate::operations;
+                use operations;
 
                 fn _test(a: U256, b: U256, c: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
@@ -1093,32 +1096,33 @@ macro_rules! test_op3 {
     };
 }
 
-test_op1!(iszero, EvmOp::Iszero, operations::Iszero);
-test_op2!(add, EvmOp::Add, operations::Add);
-test_op2!(sub, EvmOp::Sub, operations::Sub);
-test_op2!(mul, EvmOp::Mul, operations::Mul);
-test_op2!(div, EvmOp::Div, operations::Div);
-test_op2!(sdiv, EvmOp::Sdiv, operations::Sdiv);
-test_op2!(mod, EvmOp::Mod, operations::Mod);
-test_op2!(eq, EvmOp::Eq, operations::Eq);
-test_op2!(lt, EvmOp::Lt, operations::Lt);
-test_op2!(gt, EvmOp::Gt, operations::Gt);
-test_op2!(slt, EvmOp::Slt, operations::Slt);
-test_op2!(sgt, EvmOp::Sgt, operations::Sgt);
+test_op1!(iszero, EvmOp::Iszero, operations::iszero);
+test_op2!(add, EvmOp::Add, operations::add);
+test_op2!(sub, EvmOp::Sub, operations::sub);
+test_op2!(mul, EvmOp::Mul, operations::mul);
+test_op2!(div, EvmOp::Div, operations::div);
+test_op2!(sdiv, EvmOp::Sdiv, operations::sdiv);
+test_op2!(mod, EvmOp::Mod, operations::rem);
+test_op2!(eq, EvmOp::Eq, operations::eq);
+test_op2!(lt, EvmOp::Lt, operations::lt);
+test_op2!(gt, EvmOp::Gt, operations::gt);
+test_op2!(slt, EvmOp::Slt, operations::slt);
+test_op2!(sgt, EvmOp::Sgt, operations::sgt);
 
-test_op3!(addmod, EvmOp::Addmod, operations::Addmod);
-test_op3!(mulmod, EvmOp::Mulmod, operations::Mulmod);
-test_op2!(exp, EvmOp::Exp, operations::Exp);
+test_op3!(addmod, EvmOp::Addmod, operations::addmod);
+test_op3!(mulmod, EvmOp::Mulmod, operations::mulmod);
+test_op2!(exp, EvmOp::Exp, operations::exp);
 
-test_op2!(and, EvmOp::And, operations::And);
-test_op2!(or, EvmOp::Or, operations::Or);
-test_op2!(xor, EvmOp::Xor, operations::Xor);
-test_op2_small!(shl, EvmOp::Shl, operations::Shl);
-test_op2_small!(shr, EvmOp::Shr, operations::Shr);
-test_op2_small!(sar, EvmOp::Sar, operations::Sar);
-test_op2_small!(signextend, EvmOp::Signextend, operations::Signextend);
-test_op2!(smod, EvmOp::Smod, operations::Smod);
-test_op1!(not, EvmOp::Not, operations::Not);
+test_op2!(and, EvmOp::And, operations::and);
+test_op2!(or, EvmOp::Or, operations::or);
+test_op2!(xor, EvmOp::Xor, operations::xor);
+test_op2_small!(shl, EvmOp::Shl, operations::shl);
+test_op2_small!(shr, EvmOp::Shr, operations::shr);
+test_op2_small!(sar, EvmOp::Sar, operations::sar);
+test_op2_small!(signextend, EvmOp::Signextend, operations::signextend);
+test_op2_small!(byte, EvmOp::Byte, operations::byte);
+test_op2!(smod, EvmOp::Smod, operations::smod);
+test_op1!(not, EvmOp::Not, operations::not);
 test_op_dup!(dup1, EvmOp::Dup1, 1);
 test_op_dup!(dup2, EvmOp::Dup2, 2);
 test_op_dup!(dup3, EvmOp::Dup3, 3);
@@ -1153,7 +1157,6 @@ test_op_swap!(swap15, EvmOp::Swap15, 16);
 test_op_swap!(swap16, EvmOp::Swap16, 17);
 
 // TODO: remaining instructions
-//Byte,
 //Address,
 //Balance,
 //Origin,
@@ -1174,7 +1177,6 @@ test_op_swap!(swap16, EvmOp::Swap16, 17);
 //ChainId,
 //SelfBalance,
 //BaseFee,
-//Pop,
 //Pc,
 //Msize,
 //Gas,

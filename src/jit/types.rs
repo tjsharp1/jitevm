@@ -1,5 +1,5 @@
 use crate::jit::{
-    context::{BlockContext, JitEvmPtrs},
+    context::{BlockContext, JitEvmPtrs, TransactionContext},
     EVM_STACK_ELEMENT_SIZE,
 };
 use inkwell::{
@@ -26,6 +26,7 @@ pub struct JitTypes<'ctx> {
     pub type_rvec: VectorType<'ctx>,
     pub execution_context: StructType<'ctx>,
     pub block_context: StructType<'ctx>,
+    pub transaction_context: StructType<'ctx>,
     pub swap_bytes: VectorValue<'ctx>,
     pub is_little_endian: bool,
 }
@@ -70,6 +71,7 @@ impl<'ctx> JitTypes<'ctx> {
 
         let execution_context = JitEvmPtrs::llvm_struct_type(&context, &target_data);
         let block_context = BlockContext::llvm_struct_type(&context, &target_data);
+        let transaction_context = TransactionContext::llvm_struct_type(&context, &target_data);
 
         JitTypes {
             type_ptrint,
@@ -83,6 +85,7 @@ impl<'ctx> JitTypes<'ctx> {
             type_rvec,
             execution_context,
             block_context,
+            transaction_context,
             swap_bytes,
             is_little_endian,
         }

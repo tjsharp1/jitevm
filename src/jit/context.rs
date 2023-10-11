@@ -3,10 +3,14 @@ use crate::jit::{
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
     stack::{build_stack_check, build_stack_push},
-    JitEvmEngineBookkeeping, OperationsContext,
+    OperationsContext,
 };
 use inkwell::{
-    context::Context, targets::TargetData, types::StructType, values::PointerValue, AddressSpace,
+    context::Context,
+    targets::TargetData,
+    types::StructType,
+    values::{IntValue, PointerValue},
+    AddressSpace,
 };
 use primitive_types::{H160, H256, U256};
 use std::collections::HashMap;
@@ -23,7 +27,7 @@ pub(in crate::jit) struct JitEvmPtrs {
     pub memory: usize,
     pub storage: usize,
     pub block_context: usize,
-    // TODO: also tx_context..
+    pub transaction_context: usize,
 }
 
 impl<'ctx> JitEvmPtrs {
@@ -37,16 +41,48 @@ impl<'ctx> JitEvmPtrs {
             ptr_type.into(), // memory
             ptr_type.into(), // storage
             ptr_type.into(), // block_context
+            ptr_type.into(), // transaction_context
         ];
         ctx.struct_type(&fields, false)
     }
 
-    pub fn build_get_block_context_ptr(
+    pub fn build_get_transaction_context_ptr(
         ctx: &OperationsContext<'ctx>,
-        book: &JitEvmEngineBookkeeping<'ctx>,
+        execution_context: IntValue<'ctx>,
     ) -> Result<PointerValue<'ctx>, JitEvmEngineError> {
         let ptr = ctx.builder.build_int_to_ptr(
-            book.execution_context,
+            execution_context,
+            ctx.types
+                .execution_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let offset = ctx.builder.build_struct_gep(
+            ctx.types.execution_context,
+            ptr,
+            4,
+            "get_transaction_context",
+        )?;
+
+        Ok(ctx
+            .builder
+            .build_load(
+                ctx.types
+                    .transaction_context
+                    .ptr_type(AddressSpace::default()),
+                offset,
+                "transaction_context_ptr",
+            )?
+            .into_pointer_value())
+    }
+
+    pub fn build_get_block_context_ptr(
+        ctx: &OperationsContext<'ctx>,
+        execution_context: IntValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, JitEvmEngineError> {
+        let ptr = ctx.builder.build_int_to_ptr(
+            execution_context,
             ctx.types
                 .execution_context
                 .ptr_type(AddressSpace::default()),
@@ -82,6 +118,7 @@ impl JitEvmPtrs {
             memory: ctx.memory.as_mut_ptr() as usize,
             storage: &mut ctx.storage as *mut _ as usize,
             block_context: &mut ctx.block_context as *mut _ as usize,
+            transaction_context: &mut ctx.transaction_context as *mut _ as usize,
         }
     }
 
@@ -176,7 +213,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -206,7 +243,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -236,7 +273,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -267,7 +304,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -298,7 +335,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -328,7 +365,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -358,7 +395,7 @@ impl<'ctx> BlockContext {
         let book = current.book();
         build_stack_check!(ctx, current, book, 0, 1);
 
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, &book)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -382,12 +419,104 @@ impl<'ctx> BlockContext {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Debug, Default)]
+pub struct TransactionContext {
+    caller: U256,
+    gas_price: U256,
+    priority_fee: U256,
+    transact_to: U256,
+    value: U256,
+    chain_id: u64,
+    nonce: u64,
+    gas_limit: u64,
+    data: Vec<u8>,
+    // TODO:
+    //access_list: Vec<(B160, Vec<U256>)>,
+}
+
+impl TransactionContext {
+    pub fn set_gas_limit(&mut self, gas_limit: u64) {
+        self.gas_limit = gas_limit;
+    }
+}
+
+impl<'ctx> TransactionContext {
+    pub fn llvm_struct_type(ctx: &'ctx Context, target_data: &TargetData) -> StructType<'ctx> {
+        let u256_type = ctx.custom_width_int_type(256);
+        let i64_type = ctx.i64_type();
+        let ptr_type = ctx
+            .ptr_sized_int_type(target_data, None)
+            .ptr_type(AddressSpace::default());
+
+        let fields = vec![
+            u256_type.into(), // caller
+            u256_type.into(), // gas_price
+            u256_type.into(), // priority_fee
+            u256_type.into(), // transact_to
+            u256_type.into(), // value
+            i64_type.into(),  // chain_id
+            i64_type.into(),  // nonce
+            i64_type.into(),  // gas_limit
+            ptr_type.into(),  // data
+                              //u256_type.into(), // access_list
+        ];
+        ctx.struct_type(&fields, false)
+    }
+
+    pub(crate) fn gas_limit<'a>(
+        ctx: &OperationsContext<'ctx>,
+        execution_context: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, JitEvmEngineError> {
+        let tx_context_ptr =
+            JitEvmPtrs::build_get_transaction_context_ptr(&ctx, execution_context)?;
+        let ptr = ctx.builder.build_pointer_cast(
+            tx_context_ptr,
+            ctx.types
+                .transaction_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let ptr = ctx.builder.build_struct_gep(
+            ctx.types.transaction_context,
+            ptr,
+            7,
+            "get_tx_gas_limit",
+        )?;
+
+        Ok(ctx
+            .builder
+            .build_load(ctx.types.type_i64, ptr, "load_tx_gas_limit")?
+            .into_int_value())
+    }
+
+    pub(crate) fn build_get_gas_limit<'a>(
+        ctx: &OperationsContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        unimplemented!("TODO")
+        //TODO:
+        //let book = current.book();
+        //build_stack_check!(ctx, current, book, 0, 1);
+
+        //let ptr = JitEvmPtrs::build_get_transaction_context_ptr(&ctx, &book)?;
+        //let book = build_stack_push!(ctx, book, value);
+
+        //ctx.builder
+        //    .build_unconditional_branch(current.next().block)?;
+        //current.next().add_incoming(&book, current.block());
+        //Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct JitEvmExecutionContext {
     pub stack: Vec<U256>,
     pub memory: Vec<u8>,
     pub storage: HashMap<U256, U256>,
     pub block_context: BlockContext,
+    pub transaction_context: TransactionContext,
 }
 
 impl JitEvmExecutionContext {
@@ -397,6 +526,7 @@ impl JitEvmExecutionContext {
             memory: vec![0u8; EVM_MEMORY_BYTES],
             storage: HashMap::<U256, U256>::new(),
             block_context: Default::default(),
+            transaction_context: Default::default(),
         }
     }
 }
