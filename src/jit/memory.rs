@@ -11,9 +11,9 @@ pub(crate) fn build_mstore_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    let book = current.book();
-    build_stack_check!(ctx, current, book, 2, 0);
+    build_stack_check!(ctx, current, 2, 0);
 
+    let book = current.book();
     let (book, offset) = build_stack_pop!(ctx, book);
     let (book, vec0, vec1) = build_stack_pop_vector!(ctx, book);
 
@@ -45,9 +45,9 @@ pub(crate) fn build_mstore8_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    let book = current.book();
-    build_stack_check!(ctx, current, book, 2, 0);
+    build_stack_check!(ctx, current, 2, 0);
 
+    let book = current.book();
     let (book, offset) = build_stack_pop!(ctx, book);
     let (book, value) = build_stack_pop!(ctx, book);
     let value_casted = ctx.builder.build_int_cast(value, ctx.types.type_i8, "")?;
@@ -74,9 +74,9 @@ pub(crate) fn build_mload_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    let book = current.book();
-    build_stack_check!(ctx, current, book, 1, 0);
+    build_stack_check!(ctx, current, 1, 0);
 
+    let book = current.book();
     let (book, offset) = build_stack_pop!(ctx, book);
     let casted = ctx
         .builder

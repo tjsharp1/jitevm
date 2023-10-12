@@ -45,6 +45,8 @@ pub fn get_code_ops_fibonacci() -> Vec<EvmOp> {
         Swap2,
         Pop,
         Pop,
+        Push(1, U256::zero()),
+        Sstore,
         // done: requested fib number is only element on the stack!
         Stop,
     ]

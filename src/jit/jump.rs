@@ -29,8 +29,9 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_stack_check!(ctx, current, 1, 0);
+
     let book = current.book();
-    build_stack_check!(ctx, current, book, 1, 0);
     let code = current.code();
     let this = current.block();
 
@@ -104,8 +105,9 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_stack_check!(ctx, current, 2, 0);
+
     let book = current.book();
-    build_stack_check!(ctx, current, book, 2, 0);
     let code = current.code();
     let this = current.block();
     let next = current.next();
@@ -213,8 +215,9 @@ pub(crate) fn build_augmented_jumpi_op<'a, 'ctx>(
     current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
+    build_stack_check!(ctx, current, 1, 0);
+
     let book = current.book();
-    build_stack_check!(ctx, current, book, 1, 0);
     let code = current.code();
     let this = current.block();
     let next = current.next();

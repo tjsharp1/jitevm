@@ -61,7 +61,7 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
     }
 
     pub fn book(&self) -> JitEvmEngineBookkeeping<'ctx> {
-        self.render.instructions[self.idx].book()
+        self.block().book()
     }
 
     pub fn code(&self) -> &IndexedEvmCode {
@@ -155,34 +155,34 @@ impl<'ctx> InstructionCursor<'ctx> {
             let execution_context_ptr = ctx.builder.build_int_to_ptr(
                 execution_context,
                 ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
-                "",
+                "ctx_ptr",
             )?;
             let sp_int = ctx
                 .builder
-                .build_load(ctx.types.type_ptrint, execution_context_ptr, "")?
+                .build_load(ctx.types.type_ptrint, execution_context_ptr, "sp_int")?
                 .into_int_value();
-            let max_offset = (EVM_STACK_SIZE - 1) as u64 * EVM_STACK_ELEMENT_SIZE;
+            let max_offset = EVM_STACK_SIZE as u64 * EVM_STACK_ELEMENT_SIZE;
             let sp_max = ctx.builder.build_int_add(
                 sp_int,
                 ctx.types.type_ptrint.const_int(max_offset, false),
-                "",
+                "sp_max",
             )?;
             let mem_offset = ctx.builder.build_int_add(
                 execution_context,
                 ctx.types.type_ptrint.size_of(),
-                "",
+                "mem_offset",
             )?;
             let mem_ptr = ctx.builder.build_int_to_ptr(
                 mem_offset,
                 ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
-                "",
+                "mem_ptr",
             )?;
 
             let gas_remaining = TransactionContext::gas_limit(&ctx, execution_context)?;
 
             let mem = ctx
                 .builder
-                .build_load(ctx.types.type_ptrint, mem_ptr, "")?
+                .build_load(ctx.types.type_ptrint, mem_ptr, "mem")?
                 .into_int_value();
 
             JitEvmEngineBookkeeping {
@@ -205,7 +205,7 @@ impl<'ctx> InstructionCursor<'ctx> {
             } else {
                 instructions[i - 1].block
             };
-            let label = format!("Instruction #{}: {:?}", i, code.code.ops[i]);
+            let label = format!("{}_{:?}", i, code.code.ops[i]);
             instructions.push(JitEvmEngineSimpleBlock::new(
                 &ctx,
                 block_before,

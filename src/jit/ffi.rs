@@ -124,9 +124,9 @@ impl<'ctx> HostFunctions<'ctx> {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 2, 0);
+        build_stack_check!(ctx, current, 2, 0);
 
+        let book = current.book();
         let (book, offset) = build_stack_pop!(ctx, book);
         let (book, size) = build_stack_pop!(ctx, book);
 
@@ -160,9 +160,9 @@ impl<'ctx> HostFunctions<'ctx> {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 1, 0);
+        build_stack_check!(ctx, current, 1, 0);
 
+        let book = current.book();
         let _retval = ctx
             .builder
             .build_call(
@@ -186,9 +186,9 @@ impl<'ctx> HostFunctions<'ctx> {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 2, 0);
+        build_stack_check!(ctx, current, 2, 0);
 
+        let book = current.book();
         let _retval = ctx
             .builder
             .build_call(

@@ -4,9 +4,11 @@ use primitive_types::U256;
 
 pub(crate) fn build_push_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
+    build_stack_check!(ctx, current, 0, 1);
+
     let book = current.book();
     let val = ctx.types.type_stackel.const_int_arbitrary_precision(&val.0);
     let book = build_stack_push!(ctx, book, val);
@@ -21,8 +23,9 @@ pub(crate) fn build_pop_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_stack_check!(ctx, current, 1, 0);
+
     let book = current.book();
-    build_stack_check!(ctx, current, book, 1, 0);
     let (book, _) = build_stack_pop!(ctx, book);
 
     ctx.builder
@@ -32,11 +35,11 @@ pub(crate) fn build_pop_op<'a, 'ctx>(
 }
 
 macro_rules! build_stack_check {
-    ($ctx:expr, $current:ident, $book:ident, $min_stack:literal, $growth:literal) => {{
+    ($ctx:expr, $current:ident, $min_stack:literal, $growth:literal) => {{
         let min = $min_stack;
-        build_stack_check!($ctx, $current, $book, min, $growth);
+        build_stack_check!($ctx, $current, min, $growth);
     }};
-    ($ctx:expr, $current:ident, $book:ident, $min_stack:ident, $growth:literal) => {{
+    ($ctx:expr, $current:ident, $min_stack:ident, $growth:literal) => {{
         use crate::jit::{JitEvmEngineSimpleBlock, EVM_STACK_ELEMENT_SIZE};
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
@@ -60,11 +63,7 @@ macro_rules! build_stack_check {
                 .builder
                 .build_int_compare(IntPredicate::UGE, book.sp, min_sp, "")?;
 
-            let instruction_label = format!(
-                "Instruction {:?}: {}, Underflow, happy path",
-                $current.op(),
-                $current.idx()
-            );
+            let instruction_label = format!("{:?}_{}_no_underfl", $current.op(), $current.idx());
             let idx = format!("_{}", $current.idx());
             let next_block = JitEvmEngineSimpleBlock::new(
                 $ctx,
@@ -78,7 +77,6 @@ macro_rules! build_stack_check {
 
             $ctx.builder.position_at_end($current.block().block);
             // TODO: error codes... maybe add return code to book.
-
             let cmp = $ctx
                 .builder
                 .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
@@ -95,7 +93,7 @@ macro_rules! build_stack_check {
 
         if $growth > 0 {
             let book = $current.book();
-            let need_stack = ($growth - 1) * EVM_STACK_ELEMENT_SIZE;
+            let need_stack = $growth * EVM_STACK_ELEMENT_SIZE;
             let const_need_stack = $ctx.types.type_i64.const_int(need_stack, false);
             let max_sp = $ctx
                 .builder
@@ -104,11 +102,7 @@ macro_rules! build_stack_check {
                 .builder
                 .build_int_compare(IntPredicate::ULE, book.sp, max_sp, "")?;
 
-            let instruction_label = format!(
-                "Instruction {:?}: {}, Overflow, happy path",
-                $current.op(),
-                $current.idx()
-            );
+            let instruction_label = format!("{:?}_{}_no_ovf", $current.op(), $current.idx());
             let idx = format!("_{}", $current.idx());
             let next_block = JitEvmEngineSimpleBlock::new(
                 $ctx,
@@ -301,10 +295,10 @@ pub(crate) fn build_stack_swap_op<'a, 'ctx>(
     current: &mut CurrentInstruction<'a, 'ctx>,
     idx: u64,
 ) -> Result<(), JitEvmEngineError> {
-    let book = current.book();
     let idx = idx + 1;
-    build_stack_check!(ctx, current, book, idx, 0);
+    build_stack_check!(ctx, current, idx, 0);
 
+    let book = current.book();
     let (book, a) = build_stack_read!(ctx, book, 1);
     let (book, b) = build_stack_read!(ctx, book, idx);
     let book = build_stack_write!(ctx, book, 1, b);
@@ -323,9 +317,9 @@ pub(crate) fn build_dup_op<'a, 'ctx>(
     idx: u64,
 ) -> Result<(), JitEvmEngineError> {
     use crate::jit::{EVM_JIT_STACK_ALIGN, EVM_STACK_ELEMENT_SIZE};
-    let book = current.book();
-    build_stack_check!(ctx, current, book, idx, 1);
+    build_stack_check!(ctx, current, idx, 1);
 
+    let book = current.book();
     let len_stackel = ctx
         .types
         .type_ptrint
@@ -354,7 +348,7 @@ pub(crate) fn build_dup_op<'a, 'ctx>(
     )?;
     let sp = ctx.builder.build_int_add(book.sp, len_stackel, "")?;
 
-    book.update_sp(sp);
+    let book = book.update_sp(sp);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;

@@ -210,9 +210,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -240,9 +240,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -270,9 +270,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -301,9 +301,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -332,9 +332,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -362,9 +362,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -392,9 +392,9 @@ impl<'ctx> BlockContext {
         ctx: &OperationsContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = current.book();
-        build_stack_check!(ctx, current, book, 0, 1);
+        build_stack_check!(ctx, current, 0, 1);
 
+        let book = current.book();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -475,7 +475,7 @@ impl<'ctx> TransactionContext {
             ctx.types
                 .transaction_context
                 .ptr_type(AddressSpace::default()),
-            "",
+            "tx_ctx_ptr",
         )?;
 
         let ptr = ctx.builder.build_struct_gep(
@@ -497,8 +497,8 @@ impl<'ctx> TransactionContext {
     ) -> Result<(), JitEvmEngineError> {
         unimplemented!("TODO")
         //TODO:
+        //build_stack_check!(ctx, current, 0, 1);
         //let book = current.book();
-        //build_stack_check!(ctx, current, book, 0, 1);
 
         //let ptr = JitEvmPtrs::build_get_transaction_context_ptr(&ctx, &book)?;
         //let book = build_stack_push!(ctx, book, value);
