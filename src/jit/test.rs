@@ -1,7 +1,10 @@
 use crate::{
     code::EvmOp,
     constants::EVM_STACK_SIZE,
-    jit::{JitContractBuilder, JitEvmEngineError, JitEvmExecutionContext},
+    jit::{
+        ExecutionResult, Halt, JitContractBuilder, JitEvmEngineError, JitEvmExecutionContext,
+        Success,
+    },
 };
 use paste::paste;
 use primitive_types::{H160, H256, U256};
@@ -15,7 +18,7 @@ mod operations;
 fn test_jit(
     ops: Vec<EvmOp>,
     execution_context: &mut JitEvmExecutionContext,
-) -> Result<u64, JitEvmEngineError> {
+) -> Result<ExecutionResult, JitEvmEngineError> {
     use crate::code::EvmCode;
     use inkwell::context::Context;
 
@@ -28,6 +31,51 @@ fn test_jit(
     Ok(contract
         .call(execution_context)
         .expect("Contract call failed"))
+}
+
+macro_rules! expect_success {
+    ($fname:ident, $result:ident, $reason:expr) => {
+        let name_str = stringify!($fname);
+
+        match $result {
+            ExecutionResult::Success { reason } => {
+                assert_eq!(
+                    reason, $reason,
+                    "{}: expected {:?}, got {:?}",
+                    name_str, $reason, reason
+                );
+            }
+            o => panic!("{}: Expected success, got: {:?}", name_str, o),
+        }
+    };
+}
+
+macro_rules! expect_revert {
+    ($fname:ident, $result:ident) => {
+        let name_str = stringify!($fname);
+
+        match $result {
+            ExecutionResult::Revert => {}
+            o => panic!("{}: Expected revert, got: {:?}", name_str, o),
+        }
+    };
+}
+
+macro_rules! expect_halt {
+    ($fname:ident, $result:ident, $reason:expr) => {
+        let name_str = stringify!($fname);
+
+        match $result {
+            ExecutionResult::Halt { reason } => {
+                assert_eq!(
+                    reason, $reason,
+                    "{}: expected {:?}, got {:?}",
+                    name_str, $reason, reason
+                );
+            }
+            o => panic!("{}: Expected halt, got: {:?}", name_str, o),
+        }
+    };
 }
 
 macro_rules! expect_stack_overflow {
@@ -44,7 +92,8 @@ macro_rules! expect_stack_overflow {
 
                     let mut ctx = JitEvmExecutionContext::new();
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 1, "Stack overflow should occur");
+
+                    expect_halt!($fname, result, Halt::StackOverflow);
 
                     ops.pop();
                     ops.pop();
@@ -53,7 +102,8 @@ macro_rules! expect_stack_overflow {
 
                 let mut ctx = JitEvmExecutionContext::new();
                 let result = test_jit(ops, &mut ctx).expect("Contract build failed");
-                assert_eq!(result, 0, "Stack oveerflow should not occur");
+
+                expect_success!($fname, result, Success::Stop);
             }
         }
     };
@@ -74,7 +124,8 @@ macro_rules! expect_stack_underflow {
 
                     let mut ctx = JitEvmExecutionContext::new();
                     let result = test_jit(cloned, &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 1, "Stack underflow should occur");
+
+                    expect_halt!($fname, result, Halt::StackUnderflow);
 
                     ops.push(Push(32, U256::one()*i));
                 }
@@ -82,7 +133,8 @@ macro_rules! expect_stack_underflow {
 
                 let mut ctx = JitEvmExecutionContext::new();
                 let result = test_jit(ops, &mut ctx).expect("Contract build failed");
-                assert_eq!(result, 0, "Stack underflow should not occur");
+
+                expect_success!($fname, result, Success::Stop);
             }
         }
     };
@@ -108,7 +160,8 @@ macro_rules! check_context {
             ops.push(EvmOp::Mstore);
 
             let result = test_jit(ops, &mut context).expect("Contract build failed");
-            assert_eq!(result, 0, "Should pass");
+
+            expect_success!($setter, result, Success::Stop);
 
             let JitEvmExecutionContext {
                 storage, memory, ..
@@ -214,7 +267,7 @@ fn operations_jit_test_stop() {
         ops.push(EvmOp::Sstore);
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0, "Should pass");
+        expect_success!(test_stop, result, Success::Stop);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -281,8 +334,8 @@ fn operations_test_jump() {
         ops.push(EvmOp::Push(32, key1));
         ops.push(EvmOp::Sstore);
 
-        let result = test_jit(ops.clone(), &mut execution_context);
-        assert_eq!(result, Ok(0));
+        let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
+        expect_success!(test_jump, result, Success::Stop);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -298,13 +351,14 @@ fn operations_test_jump() {
         }
     }
 }
+
 #[test]
 fn test_jump_underflow() {
     let mut execution_context = JitEvmExecutionContext::new();
 
     let ops = vec![EvmOp::Jump, EvmOp::Jumpdest];
-    let result = test_jit(ops, &mut execution_context);
-    assert_eq!(result, Ok(1), "Should underflow");
+    let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
+    expect_halt!(jump_underflow, result, Halt::StackUnderflow);
 }
 
 #[test]
@@ -377,8 +431,8 @@ fn operations_test_jumpi() {
         ops.push(EvmOp::Push(32, key1_branch1));
         ops.push(EvmOp::Sstore);
 
-        let result = test_jit(ops.clone(), &mut execution_context);
-        assert_eq!(result, Ok(0));
+        let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
+        expect_success!(test_jumpi, result, Success::Stop);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -399,20 +453,20 @@ fn operations_test_jumpi() {
 fn test_jumpi_underflow() {
     let mut execution_context = JitEvmExecutionContext::new();
 
-    let ops = vec![EvmOp::Jump, EvmOp::Jumpdest];
-    let result = test_jit(ops, &mut execution_context);
-    assert_eq!(result, Ok(1), "Should underflow");
+    let ops = vec![EvmOp::Jumpi, EvmOp::Jumpdest];
+    let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
+    expect_halt!(jumpi_underflow1, result, Halt::StackUnderflow);
 
     let mut execution_context = JitEvmExecutionContext::new();
 
     let ops = vec![
         EvmOp::Push(32, U256::one()),
         EvmOp::Mload,
-        EvmOp::Jump,
+        EvmOp::Jumpi,
         EvmOp::Jumpdest,
     ];
-    let result = test_jit(ops, &mut execution_context);
-    assert_eq!(result, Ok(1), "Should still underflow");
+    let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
+    expect_halt!(jumpi_underflow2, result, Halt::StackUnderflow);
 }
 
 #[test]
@@ -461,8 +515,8 @@ fn operations_test_augmented_jump() {
     ops.push(EvmOp::Push(32, key1));
     ops.push(EvmOp::Sstore);
 
-    let result = test_jit(ops.clone(), &mut execution_context);
-    assert_eq!(result, Ok(0));
+    let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
+    expect_success!(augmented_jump, result, Success::Stop);
 
     let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -545,8 +599,8 @@ fn operations_test_augmented_jumpi() {
         ops.push(EvmOp::Push(32, key1_branch1));
         ops.push(EvmOp::Sstore);
 
-        let result = test_jit(ops.clone(), &mut execution_context);
-        assert_eq!(result, Ok(0));
+        let result = test_jit(ops.clone(), &mut execution_context).expect("Should be Ok()");
+        expect_success!(augmented_jumpi, result, Success::Stop);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -595,7 +649,7 @@ fn operations_jit_test_sha3() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0);
+        expect_success!(test_sha3, result, Success::Stop);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -637,7 +691,7 @@ fn operations_jit_test_sstore() {
 
         let mut execution_context = JitEvmExecutionContext::new();
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0);
+        expect_success!(test_sstore, result, Success::Stop);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -682,7 +736,7 @@ fn operations_jit_test_sload() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0);
+        expect_success!(test_sload, result, Success::Stop);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -726,7 +780,7 @@ fn operations_jit_test_mload() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0);
+        expect_success!(test_mload, result, Success::Stop);
 
         let JitEvmExecutionContext { stack, .. } = execution_context;
 
@@ -765,7 +819,7 @@ fn operations_jit_test_mstore8() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0);
+        expect_success!(test_mstore8, result, Success::Stop);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -804,7 +858,7 @@ fn operations_jit_test_mstore() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        assert_eq!(result, 0);
+        expect_success!(test_mstore, result, Success::Stop);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -834,7 +888,9 @@ macro_rules! test_op1 {
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 0);
+
+                    expect_success!($fname, result, Success::Stop);
+
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
                     let d_ = $opname(a);
@@ -874,7 +930,9 @@ macro_rules! test_op2 {
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 0);
+
+                    expect_success!($fname, result, Success::Stop);
+
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
                     let d_ = $opname(a, b);
@@ -918,7 +976,9 @@ macro_rules! test_op2_small {
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 0);
+
+                    expect_success!($fname, result, Success::Stop);
+
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
                     let d = stack[0];
@@ -968,7 +1028,8 @@ macro_rules! test_op_dup {
                     let mut ctx = JitEvmExecutionContext::new();
 
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 0);
+
+                    expect_success!($fname, result, Success::Stop);
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
                     let d = &stack[..original_stack.len() + 1];
@@ -1013,7 +1074,7 @@ macro_rules! test_op_swap {
 
                     let mut ctx = JitEvmExecutionContext::new();
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 0);
+                    expect_success!($fname, result, Success::Stop);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = &stack[..original_stack.len()];
@@ -1061,7 +1122,9 @@ macro_rules! test_op3 {
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
-                    assert_eq!(result, 0);
+
+                    expect_success!($fname, result, Success::Stop);
+
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
                     let d_ = $opname(a, b, c);
@@ -1192,6 +1255,7 @@ test_op_swap!(swap16, EvmOp::Swap16, 17);
 //DelegateCall,
 //Create2,
 //StaticCall,
+//Jumpdest,
 //Revert,
 //Invalid,
 //Selfdestruct,

@@ -1,8 +1,10 @@
 use crate::jit::{
-    context::TransactionContext, EvmOp, IndexedEvmCode, JitEvmEngineBookkeeping, JitEvmEngineError,
-    JitEvmEngineSimpleBlock, OperationsContext, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
+    context::{JitContractExecutionResult, JitContractResultCode, TransactionContext},
+    EvmOp, IndexedEvmCode, JitEvmEngineBookkeeping, JitEvmEngineError, JitEvmEngineSimpleBlock,
+    OperationsContext, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
 };
 use inkwell::AddressSpace;
+use inkwell::{basic_block::BasicBlock, values::IntValue};
 
 pub trait LendingIteratorLifetime<'this, ImplicitBounds: Sealed = Bounds<&'this Self>> {
     type Item;
@@ -68,16 +70,26 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
         &self.render.code
     }
 
-    pub fn end(&self) -> &JitEvmEngineSimpleBlock<'ctx> {
-        &self.render.end_block
-    }
-
     pub fn instructions(&self) -> &Vec<JitEvmEngineSimpleBlock<'ctx>> {
         &self.render.instructions
     }
 
-    pub fn error(&self) -> &JitEvmEngineSimpleBlock<'ctx> {
-        &self.render.error_block
+    pub fn incoming_error(
+        &self,
+        book: &JitEvmEngineBookkeeping<'ctx>,
+        block: &JitEvmEngineSimpleBlock<'ctx>,
+        code: IntValue<'ctx>,
+    ) {
+        self.render.error_block.add_incoming(book, block);
+        self.render
+            .error_block
+            .phi_error
+            .expect("Should only be called on an error block.")
+            .add_incoming(&[(&code, block.block)]);
+    }
+
+    pub fn error_block(&self) -> BasicBlock<'ctx> {
+        self.render.error_block.block
     }
 }
 
@@ -137,10 +149,10 @@ impl<'ctx> InstructionCursor<'ctx> {
 
         // SETUP JIT'ED CONTRACT FUNCTION
 
-        let executecontract_fn_type = ctx
-            .types
-            .type_retval
-            .fn_type(&[ctx.types.type_ptrint.into()], false);
+        let executecontract_fn_type = ctx.types.type_void.fn_type(
+            &[ctx.types.type_ptrint.into(), ctx.types.type_ptrint.into()],
+            false,
+        );
         let function = ctx
             .module
             .add_function("executecontract", executecontract_fn_type, None);
@@ -192,7 +204,6 @@ impl<'ctx> InstructionCursor<'ctx> {
                 gas_remaining,
                 sp: sp_int,
                 mem,
-                // retval: retval
             }
         };
 
@@ -223,19 +234,22 @@ impl<'ctx> InstructionCursor<'ctx> {
 
         let end_block =
             JitEvmEngineSimpleBlock::new(&ctx, instructions[ops_len - 1].block, &"end", &"-end")?;
-        ctx.builder
-            .build_return(Some(&ctx.types.type_retval.const_int(0, false)))?;
+
+        JitContractExecutionResult::build_exit_success(
+            &ctx,
+            &end_block,
+            JitContractResultCode::SuccessStop,
+        )?;
 
         // ERROR-JUMPDEST HANDLER
 
-        let error_block = JitEvmEngineSimpleBlock::new(
+        let error_block = JitEvmEngineSimpleBlock::error_block(
             &ctx,
             end_block.block,
             &"error-jumpdest",
             &"-error-jumpdest",
         )?;
-        ctx.builder
-            .build_return(Some(&ctx.types.type_retval.const_int(1, false)))?;
+        JitContractExecutionResult::build_exit_halt(&ctx, &error_block)?;
 
         Ok(InstructionCursor {
             code,

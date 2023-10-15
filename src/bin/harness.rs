@@ -1,6 +1,6 @@
 use jitevm::{
     code::{EvmCode, EvmOp},
-    jit::{JitContractBuilder, JitEvmExecutionContext},
+    jit::{ExecutionResult, JitContractBuilder, JitEvmExecutionContext, Success},
 };
 use primitive_types::{H160, U256};
 use rand::Rng;
@@ -20,7 +20,13 @@ fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
     let ret = contract
         .call(execution_context)
         .expect("Contract call failed");
-    assert_eq!(ret, 0);
+
+    match ret {
+        ExecutionResult::Success { reason } => {
+            assert_eq!(reason, Success::Stop);
+        }
+        o => panic!("Unexpected result {:?}", o),
+    }
 }
 
 fn main() {

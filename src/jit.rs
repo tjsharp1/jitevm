@@ -1,7 +1,7 @@
 use crate::constants::*;
 use crate::{
     code::{EvmOp, IndexedEvmCode},
-    jit::context::BlockContext,
+    jit::context::{BlockContext, JitContractExecutionResult},
 };
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
@@ -18,7 +18,7 @@ mod test;
 
 mod cursor;
 #[macro_use]
-mod jump;
+mod control_flow;
 #[macro_use]
 mod bytes;
 mod arithmetic;
@@ -33,12 +33,12 @@ mod types;
 use cursor::LendingIterator;
 use ffi::*;
 
-pub use context::JitEvmExecutionContext;
 use context::JitEvmPtrs;
+pub use context::{ExecutionResult, Halt, JitEvmExecutionContext, Success};
 pub use error::JitEvmEngineError;
 use types::JitTypes;
 
-pub type JitEvmCompiledContract = unsafe extern "C" fn(usize) -> u64;
+pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize) -> ();
 
 #[derive(Debug, Copy, Clone)]
 pub struct JitEvmEngineBookkeeping<'ctx> {
@@ -72,6 +72,7 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
     pub phi_gas_remaining: PhiValue<'ctx>,
     pub phi_sp: PhiValue<'ctx>,
     pub phi_mem: PhiValue<'ctx>,
+    pub phi_error: Option<PhiValue<'ctx>>,
 }
 
 impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
@@ -110,7 +111,24 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             phi_gas_remaining,
             phi_sp,
             phi_mem,
+            phi_error: None,
         })
+    }
+
+    pub fn error_block(
+        ctx: &OperationsContext<'ctx>,
+        block_before: BasicBlock<'ctx>,
+        name: &str,
+        suffix: &str,
+    ) -> Result<Self, JitEvmEngineError> {
+        let mut block = Self::new(ctx, block_before, name, suffix)?;
+
+        block.phi_error = Some(
+            ctx.builder
+                .build_phi(ctx.types.type_i32, &format!("error{}", suffix))?,
+        );
+
+        Ok(block)
     }
 
     pub fn book(&self) -> JitEvmEngineBookkeeping<'ctx> {
@@ -161,10 +179,18 @@ pub struct JitEvmContract<'ctx> {
 }
 
 impl<'ctx> JitEvmContract<'ctx> {
-    pub fn call(&self, context: &mut JitEvmExecutionContext) -> Result<u64, JitEvmEngineError> {
+    pub fn call(
+        &self,
+        context: &mut JitEvmExecutionContext,
+    ) -> Result<ExecutionResult, JitEvmEngineError> {
         unsafe {
             let mut ptrs = JitEvmPtrs::from_context(context);
-            Ok(self.function.call(&mut ptrs as *mut _ as usize))
+            let mut result = JitContractExecutionResult::default();
+
+            self.function
+                .call(&mut ptrs as *mut _ as usize, &mut result as *mut _ as usize);
+
+            Ok(ExecutionResult::from(result))
         }
     }
 }
@@ -241,18 +267,18 @@ impl<'ctx> JitContractBuilder<'ctx> {
             ctx.builder.position_at_end(current.block().block);
 
             match current.op() {
-                Stop => jump::build_stop_op(&ctx, current)?,
+                Stop => control_flow::build_stop_op(&ctx, current)?,
                 Push(_, val) => stack::build_push_op(&ctx, current, val)?,
                 Pop => stack::build_pop_op(&ctx, current)?,
-                Jumpdest => jump::build_jumpdest_op(&ctx, current)?,
+                Jumpdest => control_flow::build_jumpdest_op(&ctx, current)?,
                 Mstore => memory::build_mstore_op(&ctx, current)?,
                 Mstore8 => memory::build_mstore8_op(&ctx, current)?,
                 Mload => memory::build_mload_op(&ctx, current)?,
                 Sload => host_functions.build_sload(&ctx, current)?,
                 Sstore => host_functions.build_sstore(&ctx, current)?,
                 Sha3 => host_functions.build_sha3(&ctx, current)?,
-                Jump => jump::build_jump_op(&ctx, current)?,
-                Jumpi => jump::build_jumpi_op(&ctx, current)?,
+                Jump => control_flow::build_jump_op(&ctx, current)?,
+                Jumpi => control_flow::build_jumpi_op(&ctx, current)?,
                 Swap1 => stack::build_stack_swap_op(&ctx, current, 1)?,
                 Swap2 => stack::build_stack_swap_op(&ctx, current, 2)?,
                 Swap3 => stack::build_stack_swap_op(&ctx, current, 3)?,
@@ -316,8 +342,12 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Timestamp => BlockContext::build_get_timestamp(&ctx, current)?,
                 Coinbase => BlockContext::build_get_coinbase(&ctx, current)?,
                 Number => BlockContext::build_get_number(&ctx, current)?,
-                AugmentedPushJump(_, val) => jump::build_augmented_jump_op(&ctx, current, val)?,
-                AugmentedPushJumpi(_, val) => jump::build_augmented_jumpi_op(&ctx, current, val)?,
+                AugmentedPushJump(_, val) => {
+                    control_flow::build_augmented_jump_op(&ctx, current, val)?
+                }
+                AugmentedPushJumpi(_, val) => {
+                    control_flow::build_augmented_jumpi_op(&ctx, current, val)?
+                }
                 _ => {
                     panic!("Op not implemented: {:?}", current.op());
                 }

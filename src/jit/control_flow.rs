@@ -1,16 +1,20 @@
 use crate::jit::stack::{build_stack_check, build_stack_pop};
 use crate::jit::{
-    cursor::CurrentInstruction, JitEvmEngineError, JitEvmEngineSimpleBlock, OperationsContext,
+    context::JitContractResultCode, cursor::CurrentInstruction, JitContractExecutionResult,
+    JitEvmEngineError, JitEvmEngineSimpleBlock, OperationsContext,
 };
 use inkwell::{AddressSpace, IntPredicate};
 use primitive_types::U256;
 
 pub(crate) fn build_stop_op<'a, 'ctx>(
     ctx: &OperationsContext<'ctx>,
-    _: &CurrentInstruction<'a, 'ctx>,
+    current: &CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    let val = ctx.types.type_retval.const_int(0, false);
-    ctx.builder.build_return(Some(&val))?;
+    JitContractExecutionResult::build_exit_success(
+        &ctx,
+        current.block(),
+        JitContractResultCode::SuccessStop,
+    )?;
     Ok(())
 }
 
@@ -67,6 +71,9 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
             .build_unconditional_branch(jump_table[0].block)?;
         jump_table[0].add_incoming(&book, this);
 
+        let invalid_jump = u32::from(JitContractResultCode::InvalidJump);
+        let invalid_jump = ctx.types.type_i32.const_int(invalid_jump as u64, false);
+
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
@@ -82,10 +89,10 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
                 ctx.builder.build_conditional_branch(
                     cmp,
                     instructions[*jmp_i].block,
-                    current.error().block,
+                    current.error_block(),
                 )?;
                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                current.error().add_incoming(&book, &jump_table[j]);
+                current.incoming_error(&book, &jump_table[j], invalid_jump);
             } else {
                 ctx.builder.build_conditional_branch(
                     cmp,
@@ -152,6 +159,8 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
         next.add_incoming(&book, this);
         jump_table[0].add_incoming(&book, this);
 
+        let invalid_jump = u32::from(JitContractResultCode::InvalidJump);
+        let invalid_jump = ctx.types.type_i32.const_int(invalid_jump as u64, false);
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
@@ -167,10 +176,10 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
                 ctx.builder.build_conditional_branch(
                     cmp,
                     instructions[*jmp_i].block,
-                    current.error().block,
+                    current.error_block(),
                 )?;
                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                current.error().add_incoming(&book, &jump_table[j]);
+                current.incoming_error(&book, &jump_table[j], invalid_jump);
             } else {
                 ctx.builder.build_conditional_branch(
                     cmp,

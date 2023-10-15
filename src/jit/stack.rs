@@ -40,7 +40,9 @@ macro_rules! build_stack_check {
         build_stack_check!($ctx, $current, min, $growth);
     }};
     ($ctx:expr, $current:ident, $min_stack:ident, $growth:literal) => {{
-        use crate::jit::{JitEvmEngineSimpleBlock, EVM_STACK_ELEMENT_SIZE};
+        use crate::jit::{
+            context::JitContractResultCode, JitEvmEngineSimpleBlock, EVM_STACK_ELEMENT_SIZE,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
@@ -73,10 +75,12 @@ macro_rules! build_stack_check {
             )?;
 
             next_block.add_incoming(&book, $current.block());
-            $current.error().add_incoming(&book, $current.block());
+
+            let underflow = u32::from(JitContractResultCode::StackUnderflow);
+            let result_code = $ctx.types.type_i32.const_int(underflow as u64, false);
+            $current.incoming_error(&book, $current.block(), result_code);
 
             $ctx.builder.position_at_end($current.block().block);
-            // TODO: error codes... maybe add return code to book.
             let cmp = $ctx
                 .builder
                 .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
@@ -85,7 +89,7 @@ macro_rules! build_stack_check {
                 .ok_or(JitEvmEngineError::NoInstructionValue)?
                 .into_int_value();
             $ctx.builder
-                .build_conditional_branch(cmp, next_block.block, $current.error().block)?;
+                .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
             $ctx.builder.position_at_end(next_block.block);
 
             $current.update_current_block(next_block);
@@ -112,10 +116,12 @@ macro_rules! build_stack_check {
             )?;
 
             next_block.add_incoming(&book, $current.block());
-            $current.error().add_incoming(&book, $current.block());
+
+            let overflow = u32::from(JitContractResultCode::StackOverflow);
+            let result_code = $ctx.types.type_i32.const_int(overflow as u64, false);
+            $current.incoming_error(&book, $current.block(), result_code);
 
             $ctx.builder.position_at_end($current.block().block);
-            // TODO: error codes... maybe add return code to book.
             let cmp = $ctx
                 .builder
                 .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
@@ -124,7 +130,7 @@ macro_rules! build_stack_check {
                 .ok_or(JitEvmEngineError::NoInstructionValue)?
                 .into_int_value();
             $ctx.builder
-                .build_conditional_branch(cmp, next_block.block, $current.error().block)?;
+                .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
             $ctx.builder.position_at_end(next_block.block);
 
             $current.update_current_block(next_block);

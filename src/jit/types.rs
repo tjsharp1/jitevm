@@ -1,5 +1,5 @@
 use crate::jit::{
-    context::{BlockContext, JitEvmPtrs, TransactionContext},
+    context::{BlockContext, JitContractExecutionResult, JitEvmPtrs, TransactionContext},
     EVM_STACK_ELEMENT_SIZE,
 };
 use inkwell::{
@@ -20,11 +20,13 @@ pub struct JitTypes<'ctx> {
     pub type_void: VoidType<'ctx>,
     pub type_retval: IntType<'ctx>,
     pub type_i8: IntType<'ctx>,
+    pub type_i32: IntType<'ctx>,
     pub type_i64: IntType<'ctx>,
     /// Types for vectorized byte swapping, to re-order endianness
     pub type_ivec: VectorType<'ctx>,
     pub type_rvec: VectorType<'ctx>,
     pub execution_context: StructType<'ctx>,
+    pub execution_result: StructType<'ctx>,
     pub block_context: StructType<'ctx>,
     pub transaction_context: StructType<'ctx>,
     pub swap_bytes: VectorValue<'ctx>,
@@ -51,7 +53,7 @@ impl<'ctx> JitTypes<'ctx> {
         assert_eq!(type_retval.get_bit_width(), 64);
         assert_eq!(u64::BITS, 64);
 
-        // TODO: move this to types
+        let type_i32 = context.i64_type();
         let type_i64 = context.i64_type();
 
         // types for vectorized byte swapping
@@ -70,6 +72,7 @@ impl<'ctx> JitTypes<'ctx> {
         let type_void = context.void_type();
 
         let execution_context = JitEvmPtrs::llvm_struct_type(&context, &target_data);
+        let execution_result = JitContractExecutionResult::llvm_struct_type(&context, &target_data);
         let block_context = BlockContext::llvm_struct_type(&context, &target_data);
         let transaction_context = TransactionContext::llvm_struct_type(&context, &target_data);
 
@@ -80,10 +83,12 @@ impl<'ctx> JitTypes<'ctx> {
             type_bool,
             type_void,
             type_i8,
+            type_i32,
             type_i64,
             type_ivec,
             type_rvec,
             execution_context,
+            execution_result,
             block_context,
             transaction_context,
             swap_bytes,
