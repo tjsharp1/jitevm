@@ -1,11 +1,10 @@
 use crate::constants::*;
 use crate::jit::{
+    contract::{JitEvmEngineSimpleBlock, OperationsContext},
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
-    stack::{build_stack_check, build_stack_push},
-    JitEvmEngineSimpleBlock, OperationsContext,
+    ops::{build_stack_check, build_stack_push},
 };
-use bytes::Bytes;
 use inkwell::{
     context::Context,
     targets::TargetData,
@@ -275,7 +274,7 @@ pub(in crate::jit) struct JitContractExecutionResult {
 }
 
 impl<'ctx> JitContractExecutionResult {
-    pub fn llvm_struct_type(ctx: &'ctx Context, target_data: &TargetData) -> StructType<'ctx> {
+    pub fn llvm_struct_type(ctx: &'ctx Context, _: &TargetData) -> StructType<'ctx> {
         let type_i32 = ctx.i32_type();
         let type_i64 = ctx.i64_type();
 
@@ -291,8 +290,6 @@ impl<'ctx> JitContractExecutionResult {
         ctx: &OperationsContext<'ctx>,
         block: &JitEvmEngineSimpleBlock<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = block.book();
-
         let function = ctx
             .module
             .get_function("executecontract")

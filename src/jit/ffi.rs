@@ -1,9 +1,10 @@
 use crate::jit::{
+    context::JitEvmPtrs,
+    contract::OperationsContext,
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
-    stack::{build_stack_check, build_stack_inc, build_stack_pop},
+    ops::{build_stack_check, build_stack_inc, build_stack_pop},
     types::JitTypes,
-    JitEvmPtrs, OperationsContext,
 };
 use hex_literal::hex;
 use inkwell::{

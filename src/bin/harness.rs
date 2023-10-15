@@ -1,6 +1,6 @@
 use jitevm::{
     code::{EvmCode, EvmOp},
-    jit::{ExecutionResult, JitContractBuilder, JitEvmExecutionContext, Success},
+    jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, Success},
 };
 use primitive_types::{H160, U256};
 use rand::Rng;

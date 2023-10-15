@@ -1,7 +1,8 @@
-use crate::jit::stack::{build_stack_check, build_stack_pop, build_stack_push};
+use crate::jit::ops::{build_stack_check, build_stack_pop, build_stack_push};
 use crate::jit::{
-    cursor::CurrentInstruction, EvmOp, JitEvmEngineError, JitEvmEngineSimpleBlock,
-    OperationsContext,
+    contract::{JitEvmEngineSimpleBlock, OperationsContext},
+    cursor::CurrentInstruction,
+    EvmOp, JitEvmEngineError,
 };
 use inkwell::{AddressSpace, IntPredicate};
 

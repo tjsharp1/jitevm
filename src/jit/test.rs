@@ -2,8 +2,8 @@ use crate::{
     code::EvmOp,
     constants::EVM_STACK_SIZE,
     jit::{
-        ExecutionResult, Halt, JitContractBuilder, JitEvmEngineError, JitEvmExecutionContext,
-        Success,
+        contract::JitContractBuilder, ExecutionResult, Halt, JitEvmEngineError,
+        JitEvmExecutionContext, Success,
     },
 };
 use paste::paste;

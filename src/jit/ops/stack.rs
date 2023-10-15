@@ -1,4 +1,4 @@
-use crate::jit::{cursor::CurrentInstruction, JitEvmEngineError, OperationsContext};
+use crate::jit::{contract::OperationsContext, cursor::CurrentInstruction, JitEvmEngineError};
 use inkwell::AddressSpace;
 use primitive_types::U256;
 
@@ -41,7 +41,8 @@ macro_rules! build_stack_check {
     }};
     ($ctx:expr, $current:ident, $min_stack:ident, $growth:literal) => {{
         use crate::jit::{
-            context::JitContractResultCode, JitEvmEngineSimpleBlock, EVM_STACK_ELEMENT_SIZE,
+            context::JitContractResultCode, contract::JitEvmEngineSimpleBlock,
+            EVM_STACK_ELEMENT_SIZE,
         };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
@@ -363,8 +364,5 @@ pub(crate) fn build_dup_op<'a, 'ctx>(
 }
 
 pub(crate) use build_stack_check;
-pub(crate) use build_stack_inc;
 pub(crate) use build_stack_pop;
-pub(crate) use build_stack_pop_vector;
 pub(crate) use build_stack_push;
-pub(crate) use build_stack_push_vector;

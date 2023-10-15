@@ -1,7 +1,7 @@
 use crate::jit::{
     context::{JitContractExecutionResult, JitContractResultCode, TransactionContext},
-    EvmOp, IndexedEvmCode, JitEvmEngineBookkeeping, JitEvmEngineError, JitEvmEngineSimpleBlock,
-    OperationsContext, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
+    contract::{JitEvmEngineBookkeeping, JitEvmEngineSimpleBlock, OperationsContext},
+    EvmOp, IndexedEvmCode, JitEvmEngineError, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
 };
 use inkwell::AddressSpace;
 use inkwell::{basic_block::BasicBlock, values::IntValue};

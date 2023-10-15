@@ -1,8 +1,8 @@
-use crate::jit::stack::{
+use crate::jit::ops::{
     build_stack_check, build_stack_pop, build_stack_pop_vector, build_stack_push_vector,
 };
 use crate::jit::{
-    cursor::CurrentInstruction, JitEvmEngineError, OperationsContext, EVM_JIT_STACK_ALIGN,
+    contract::OperationsContext, cursor::CurrentInstruction, JitEvmEngineError, EVM_JIT_STACK_ALIGN,
 };
 use inkwell::{values::BasicValue, AddressSpace};
 

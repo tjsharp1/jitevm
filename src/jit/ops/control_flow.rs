@@ -1,7 +1,9 @@
-use crate::jit::stack::{build_stack_check, build_stack_pop};
+use crate::jit::ops::stack::{build_stack_check, build_stack_pop};
 use crate::jit::{
-    context::JitContractResultCode, cursor::CurrentInstruction, JitContractExecutionResult,
-    JitEvmEngineError, JitEvmEngineSimpleBlock, OperationsContext,
+    context::JitContractResultCode,
+    contract::{JitEvmEngineSimpleBlock, OperationsContext},
+    cursor::CurrentInstruction,
+    JitContractExecutionResult, JitEvmEngineError,
 };
 use inkwell::{AddressSpace, IntPredicate};
 use primitive_types::U256;
