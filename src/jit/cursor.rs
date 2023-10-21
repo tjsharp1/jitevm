@@ -1,6 +1,6 @@
 use crate::jit::{
     context::{JitContractExecutionResult, JitContractResultCode, TransactionContext},
-    contract::{JitEvmEngineBookkeeping, JitEvmEngineSimpleBlock, OperationsContext},
+    contract::{BuilderContext, JitEvmEngineBookkeeping, JitEvmEngineSimpleBlock},
     EvmOp, IndexedEvmCode, JitEvmEngineError, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
 };
 use inkwell::AddressSpace;
@@ -139,7 +139,7 @@ pub(crate) struct InstructionCursor<'ctx> {
 
 impl<'ctx> InstructionCursor<'ctx> {
     pub fn new(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         code: IndexedEvmCode,
     ) -> Result<Self, JitEvmEngineError> {
         let ops_len = code.code.ops.len();
@@ -150,7 +150,11 @@ impl<'ctx> InstructionCursor<'ctx> {
         // SETUP JIT'ED CONTRACT FUNCTION
 
         let executecontract_fn_type = ctx.types.type_void.fn_type(
-            &[ctx.types.type_ptrint.into(), ctx.types.type_ptrint.into()],
+            &[
+                ctx.types.type_ptrint.into(),
+                ctx.types.type_ptrint.into(),
+                ctx.types.type_i64.into(),
+            ],
             false,
         );
         let function = ctx
@@ -190,7 +194,9 @@ impl<'ctx> InstructionCursor<'ctx> {
                 "mem_ptr",
             )?;
 
-            let gas_remaining = TransactionContext::gas_limit(&ctx, execution_context)?;
+            let init_gas = function.get_nth_param(2).unwrap().into_int_value();
+            let gas_limit = TransactionContext::gas_limit(&ctx, execution_context)?;
+            let gas_remaining = ctx.builder.build_int_sub(gas_limit, init_gas, "")?;
 
             let mem = ctx
                 .builder

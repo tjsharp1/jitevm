@@ -1,7 +1,10 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inkwell::context::Context;
 use jitevm::code::{EvmCode, EvmOpParserMode};
-use jitevm::jit::{JitContractBuilder, JitEvmContract, JitEvmExecutionContext};
+use jitevm::jit::{
+    contract::{JitContractBuilder, JitEvmContract},
+    JitEvmExecutionContext,
+};
 use jitevm::test_data;
 use revm::{
     db::in_memory_db::BenchmarkDB,

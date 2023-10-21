@@ -45,8 +45,6 @@ pub fn get_code_ops_fibonacci() -> Vec<EvmOp> {
         Swap2,
         Pop,
         Pop,
-        Push(1, U256::zero()),
-        Sstore,
         // done: requested fib number is only element on the stack!
         Stop,
     ]
@@ -58,7 +56,7 @@ pub fn get_code_ops_fibonacci_repetitions() -> Vec<EvmOp> {
 
     vec![
         // input to the program: number of repetitions
-        Push(2, U256::zero() + 10000),
+        Push(2, U256::zero() + 50000),
         // 3
         Jumpdest,
         Dup1,

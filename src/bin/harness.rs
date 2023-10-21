@@ -1,12 +1,36 @@
 use jitevm::{
     code::{EvmCode, EvmOp},
-    jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, Success},
+    jit::{
+        contract::JitContractBuilder, gas, ExecutionResult, JitEvmEngineError,
+        JitEvmExecutionContext, Success,
+    },
+    spec::SpecId,
 };
-use primitive_types::{H160, U256};
+use primitive_types::U256;
 use rand::Rng;
-use std::collections::{HashMap, HashSet};
 
-fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
+macro_rules! expect_success {
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {
+        let name_str = stringify!($fname);
+
+        match $result {
+            ExecutionResult::Success { reason, gas_used } => {
+                assert_eq!(
+                    reason, $reason,
+                    "{}: expected {:?}, got {:?}",
+                    name_str, $reason, reason
+                );
+                assert_eq!(gas_used, $gas, "{}: incorrect gas usage.", name_str);
+            }
+            o => panic!("{}: Expected success, got: {:?}", name_str, o),
+        }
+    };
+}
+
+fn test_jit(
+    ops: Vec<EvmOp>,
+    execution_context: &mut JitEvmExecutionContext,
+) -> Result<ExecutionResult, JitEvmEngineError> {
     use inkwell::context::Context;
 
     let context = Context::create();
@@ -16,50 +40,37 @@ fn test_jit(ops: Vec<EvmOp>, execution_context: &mut JitEvmExecutionContext) {
         .debug_asm("jit_test.asm")
         .build(EvmCode { ops: ops.clone() }.index())
         .unwrap();
-    // TODO: this return ptr should be a data structure with final state info?
-    let ret = contract
+    Ok(contract
         .call(execution_context)
-        .expect("Contract call failed");
-
-    match ret {
-        ExecutionResult::Success { reason } => {
-            assert_eq!(reason, Success::Stop);
-        }
-        o => panic!("Unexpected result {:?}", o),
-    }
+        .expect("Contract call failed"))
 }
 
 fn main() {
-    let mut execution_context = JitEvmExecutionContext::new();
+    use jitevm::code::EvmOp::*;
 
-    let mut expected_store = HashMap::new();
-    let mut ops = Vec::new();
+    fn test(a: U256) {
+        let mut ctx = JitEvmExecutionContext::new();
 
-    let mut coinbase = rand::thread_rng().gen::<[u8; 32]>();
-    coinbase[..12].copy_from_slice(&[0u8; 12]);
-    execution_context
-        .block_context
-        .set_coinbase(H160::from_slice(&coinbase[12..]));
-    expected_store.insert(U256::one(), U256::from_little_endian(&coinbase));
+        let gas = gas::Gas::new(SpecId::LATEST);
+        let push_cost = gas.const_cost(Push(32, U256::zero()));
+        let op_cost = gas.const_cost(Iszero);
+        let expected_gas = push_cost + op_cost;
 
-    ops.push(EvmOp::Coinbase);
-    ops.push(EvmOp::Push(32, U256::one()));
-    ops.push(EvmOp::Sstore);
+        let result = test_jit(vec![Push(32, a), Iszero], &mut ctx).expect("JIT test failed");
 
-    test_jit(ops, &mut execution_context);
+        expect_success!(zero, result, Success::Stop, expected_gas);
 
-    let JitEvmExecutionContext { storage, .. } = execution_context;
+        let JitEvmExecutionContext { stack, .. } = ctx;
+        let d = stack[0];
+        println!("{:?}", d);
+    }
 
-    let expected_keys: HashSet<U256> = expected_store.keys().cloned().collect();
-    let actual_keys: HashSet<U256> = storage.keys().cloned().collect();
+    test(U256::zero());
+    test(U256::one());
 
-    let diff = expected_keys.symmetric_difference(&actual_keys).count();
-    assert_eq!(diff, 0);
-
-    for (key, value) in expected_store.iter() {
-        let stored = *storage.get(key).expect("Storage should have item");
-        println!("e: {:x?}", value);
-        println!("g: {:x?}", stored);
-        assert_eq!(*value, stored);
+    for _i in 0..1000 {
+        let a = rand::thread_rng().gen::<[u8; 32]>();
+        let a = U256::from_big_endian(&a);
+        test(a);
     }
 }

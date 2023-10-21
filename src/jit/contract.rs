@@ -5,10 +5,12 @@ use crate::{
         context::{BlockContext, JitContractExecutionResult, JitEvmPtrs},
         cursor::{self, LendingIterator},
         error::JitEvmEngineError,
+        gas::Gas,
         ops,
         types::JitTypes,
         ExecutionResult,
     },
+    spec::SpecId,
 };
 
 use inkwell::basic_block::BasicBlock;
@@ -21,7 +23,7 @@ use inkwell::values::{IntValue, PhiValue};
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
 
-pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize) -> ();
+pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize, u64) -> ();
 
 #[derive(Debug, Copy, Clone)]
 pub struct JitEvmEngineBookkeeping<'ctx> {
@@ -60,7 +62,7 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
 
 impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
     pub fn new(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         block_before: BasicBlock<'ctx>,
         name: &str,
         suffix: &str,
@@ -99,7 +101,7 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
     }
 
     pub fn error_block(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         block_before: BasicBlock<'ctx>,
         name: &str,
         suffix: &str,
@@ -158,6 +160,7 @@ pub struct JitEvmContract<'ctx> {
     // NOTE: will likely need the module, if linking contract calls via llvm
     //module: Module<'ctx>,
     //execution_engine: ExecutionEngine<'ctx>,
+    gas: Gas,
     function: JitFunction<'ctx, JitEvmCompiledContract>,
 }
 
@@ -166,27 +169,35 @@ impl<'ctx> JitEvmContract<'ctx> {
         &self,
         context: &mut jit::JitEvmExecutionContext,
     ) -> Result<ExecutionResult, JitEvmEngineError> {
+        // TODO: txdata from context. Calldata instruction
+        //       check gas_limits here, or from caller
+        let init_gas = self.gas.init_gas(&[]);
+
         unsafe {
             let mut ptrs = JitEvmPtrs::from_context(context);
             let mut result = JitContractExecutionResult::default();
 
-            self.function
-                .call(&mut ptrs as *mut _ as usize, &mut result as *mut _ as usize);
+            self.function.call(
+                &mut ptrs as *mut _ as usize,
+                &mut result as *mut _ as usize,
+                init_gas as u64,
+            );
 
             Ok(ExecutionResult::from(result))
         }
     }
 }
 
-pub struct OperationsContext<'ctx> {
+pub struct BuilderContext<'ctx> {
     pub context: &'ctx Context,
+    pub gas: Gas,
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     pub types: JitTypes<'ctx>,
 }
 
 pub struct JitContractBuilder<'ctx> {
-    pub ctx: OperationsContext<'ctx>,
+    pub ctx: BuilderContext<'ctx>,
     pub debug_ir: Option<String>,
     pub debug_asm: Option<String>,
     pub host_functions: jit::HostFunctions<'ctx>,
@@ -203,9 +214,11 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
         let types = JitTypes::new(&context, &execution_engine);
         let host_functions = jit::HostFunctions::new(types.clone(), &module, &execution_engine);
+        let gas = Gas::new(SpecId::LATEST);
 
-        let ctx = OperationsContext {
+        let ctx = BuilderContext {
             context,
+            gas,
             module,
             builder,
             types,
@@ -218,6 +231,11 @@ impl<'ctx> JitContractBuilder<'ctx> {
             debug_asm: None,
             host_functions,
         })
+    }
+
+    pub fn with_spec_id(mut self, spec_id: SpecId) -> Self {
+        self.ctx.gas.set_spec_id(spec_id);
+        self
     }
 
     pub fn debug_ir(mut self, filename: &str) -> Self {
@@ -365,9 +383,11 @@ impl<'ctx> JitContractBuilder<'ctx> {
             machine.write_to_file(&ctx.module, FileType::Assembly, path.as_ref())?;
         }
 
+        let BuilderContext { gas, .. } = ctx;
+
         // COMPILE
         let function: JitFunction<JitEvmCompiledContract> =
             unsafe { execution_engine.get_function("executecontract")? };
-        Ok(JitEvmContract { function })
+        Ok(JitEvmContract { gas, function })
     }
 }

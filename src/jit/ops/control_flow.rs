@@ -1,16 +1,14 @@
 use crate::jit::ops::stack::{build_stack_check, build_stack_pop};
 use crate::jit::{
-    context::JitContractResultCode,
-    contract::{JitEvmEngineSimpleBlock, OperationsContext},
-    cursor::CurrentInstruction,
-    JitContractExecutionResult, JitEvmEngineError,
+    context::JitContractResultCode, contract::BuilderContext, cursor::CurrentInstruction,
+    gas::build_gas_check, JitContractExecutionResult, JitEvmEngineError,
 };
-use inkwell::{AddressSpace, IntPredicate};
+use inkwell::AddressSpace;
 use primitive_types::U256;
 
 pub(crate) fn build_stop_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    ctx: &BuilderContext<'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     JitContractExecutionResult::build_exit_success(
         &ctx,
@@ -21,10 +19,13 @@ pub(crate) fn build_stop_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_jumpdest_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    ctx: &BuilderContext<'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
+
     let book = current.book();
+
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
     current.next().add_incoming(&book, current.block());
@@ -32,9 +33,10 @@ pub(crate) fn build_jumpdest_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_jump_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
     let book = current.book();
@@ -111,9 +113,10 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_jumpi_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
     let book = current.book();
@@ -198,10 +201,11 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_augmented_jump_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
-    current: &CurrentInstruction<'a, 'ctx>,
+    ctx: &BuilderContext<'ctx>,
+    current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     let book = current.book();
     let code = current.code();
     let this = current.block();
@@ -222,10 +226,11 @@ pub(crate) fn build_augmented_jump_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_augmented_jumpi_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
     let book = current.book();

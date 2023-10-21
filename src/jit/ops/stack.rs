@@ -1,12 +1,15 @@
-use crate::jit::{contract::OperationsContext, cursor::CurrentInstruction, JitEvmEngineError};
+use crate::jit::{
+    contract::BuilderContext, cursor::CurrentInstruction, gas::build_gas_check, JitEvmEngineError,
+};
 use inkwell::AddressSpace;
 use primitive_types::U256;
 
 pub(crate) fn build_push_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 0, 1);
 
     let book = current.book();
@@ -20,9 +23,10 @@ pub(crate) fn build_push_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_pop_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
     let book = current.book();
@@ -298,11 +302,12 @@ macro_rules! build_stack_read {
 }
 
 pub(crate) fn build_stack_swap_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     idx: u64,
 ) -> Result<(), JitEvmEngineError> {
     let idx = idx + 1;
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, idx, 0);
 
     let book = current.book();
@@ -319,11 +324,12 @@ pub(crate) fn build_stack_swap_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_dup_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     idx: u64,
 ) -> Result<(), JitEvmEngineError> {
     use crate::jit::{EVM_JIT_STACK_ALIGN, EVM_STACK_ELEMENT_SIZE};
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, idx, 1);
 
     let book = current.book();

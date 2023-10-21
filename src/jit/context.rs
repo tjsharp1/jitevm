@@ -1,10 +1,11 @@
 use crate::constants::*;
 use crate::jit::{
-    contract::{JitEvmEngineSimpleBlock, OperationsContext},
+    contract::{BuilderContext, JitEvmEngineSimpleBlock},
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
     ops::{build_stack_check, build_stack_push},
 };
+use bytes::Bytes;
 use inkwell::{
     context::Context,
     targets::TargetData,
@@ -102,18 +103,18 @@ pub enum ExecutionResult {
     /// Returned successfully
     Success {
         reason: Success,
-        //gas_used: u64,
+        gas_used: u64,
         //gas_refunded: u64,
         //logs: Vec<Log>,
         //output: Output,
     },
     /// Reverted by `REVERT` opcode that doesn't spend all gas.
-    Revert, // { gas_used: u64, output: Bytes },
+    Revert { gas_used: u64, output: Bytes },
     /// Reverted for various reasons and spend all gas.
     Halt {
         reason: Halt,
-        ///// Halting will spend all the gas, and will be equal to gas_limit.
-        //gas_used: u64,
+        /// Halting will spend all the gas, and will be equal to gas_limit.
+        gas_used: u64,
     },
 }
 
@@ -130,13 +131,17 @@ impl From<JitContractExecutionResult> for ExecutionResult {
         if code.is_success() {
             let reason = code.into();
 
-            ExecutionResult::Success { reason }
+            ExecutionResult::Success { reason, gas_used }
         } else if code.is_revert() {
-            ExecutionResult::Revert // { gas_used, output: Bytes::new() }
+            // TODO: revert instruction...
+            ExecutionResult::Revert {
+                gas_used,
+                output: Bytes::new(),
+            }
         } else {
             let reason = code.into();
 
-            ExecutionResult::Halt { reason } //, gas_used }
+            ExecutionResult::Halt { reason, gas_used }
         }
     }
 }
@@ -287,9 +292,11 @@ impl<'ctx> JitContractExecutionResult {
     }
 
     pub fn build_exit_halt(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         block: &JitEvmEngineSimpleBlock<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+        let book = block.book();
+
         let function = ctx
             .module
             .get_function("executecontract")
@@ -316,12 +323,22 @@ impl<'ctx> JitContractExecutionResult {
             .into_int_value();
         ctx.builder.build_store(result_code_ptr, error_code)?;
 
+        let gas_used_ptr =
+            ctx.builder
+                .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
+
+        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_used = ctx
+            .builder
+            .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
+        ctx.builder.build_store(gas_used_ptr, gas_used)?;
+
         ctx.builder.build_return(None)?;
         Ok(())
     }
 
     pub fn build_exit_success(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         block: &JitEvmEngineSimpleBlock<'ctx>,
         code: JitContractResultCode,
     ) -> Result<(), JitEvmEngineError> {
@@ -404,7 +421,7 @@ impl<'ctx> JitEvmPtrs {
     }
 
     pub fn build_get_transaction_context_ptr(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         execution_context: IntValue<'ctx>,
     ) -> Result<PointerValue<'ctx>, JitEvmEngineError> {
         let ptr = ctx.builder.build_int_to_ptr(
@@ -435,7 +452,7 @@ impl<'ctx> JitEvmPtrs {
     }
 
     pub fn build_get_block_context_ptr(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         execution_context: IntValue<'ctx>,
     ) -> Result<PointerValue<'ctx>, JitEvmEngineError> {
         let ptr = ctx.builder.build_int_to_ptr(
@@ -564,7 +581,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_number<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -594,7 +611,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_coinbase<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -624,7 +641,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_timestamp<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -655,7 +672,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_difficulty<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -686,7 +703,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_randao<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -716,7 +733,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_basefee<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -746,7 +763,7 @@ impl<'ctx> BlockContext {
     }
 
     pub(crate) fn build_get_gas_limit<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 0, 1);
@@ -777,7 +794,7 @@ impl<'ctx> BlockContext {
 }
 
 #[repr(C)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TransactionContext {
     caller: U256,
     gas_price: U256,
@@ -789,6 +806,24 @@ pub struct TransactionContext {
     gas_limit: u64,
     data: usize,
     len: usize,
+}
+
+impl Default for TransactionContext {
+    fn default() -> TransactionContext {
+        // TODO: good defaults?
+        TransactionContext {
+            caller: U256::zero(),
+            gas_price: U256::zero(),
+            priority_fee: U256::zero(),
+            transact_to: U256::zero(),
+            value: U256::zero(),
+            chain_id: 1,
+            nonce: 0,
+            gas_limit: u64::MAX,
+            data: 0,
+            len: 0,
+        }
+    }
 }
 
 impl TransactionContext {
@@ -821,7 +856,7 @@ impl<'ctx> TransactionContext {
     }
 
     pub(crate) fn gas_limit<'a>(
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         execution_context: IntValue<'ctx>,
     ) -> Result<IntValue<'ctx>, JitEvmEngineError> {
         let tx_context_ptr =

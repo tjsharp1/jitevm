@@ -1,15 +1,17 @@
 use crate::jit::ops::{build_stack_check, build_stack_pop, build_stack_push};
 use crate::jit::{
-    contract::{JitEvmEngineSimpleBlock, OperationsContext},
+    contract::{BuilderContext, JitEvmEngineSimpleBlock},
     cursor::CurrentInstruction,
+    gas::{build_gas_check, build_gas_check_exp},
     EvmOp, JitEvmEngineError,
 };
 use inkwell::{AddressSpace, IntPredicate};
 
 pub(crate) fn iszero_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
     let book = current.book();
@@ -67,9 +69,10 @@ pub(crate) fn iszero_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_byte_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
     let book = current.book();
@@ -103,9 +106,10 @@ pub(crate) fn build_byte_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_arithmetic_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
     let book = current.book();
@@ -150,10 +154,11 @@ pub(crate) fn build_arithmetic_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_cmp_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     predicate: IntPredicate,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
     let book = current.book();
@@ -207,9 +212,10 @@ pub(crate) fn build_cmp_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_signextend_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
     let book = current.book();
@@ -266,9 +272,10 @@ pub(crate) fn build_signextend_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_mod_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 3, 0);
 
     let book = current.book();
@@ -335,54 +342,72 @@ macro_rules! op2_i256_exp_bit {
 }
 
 pub(crate) fn build_exp_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let this = current.block();
-    let next = current.next();
-
-    let (book, a) = build_stack_pop!(ctx, book);
-    let (book, exp) = build_stack_pop!(ctx, book);
-
     let const_1 = ctx.types.type_stackel.const_int(1, false);
     let zero = ctx.types.type_stackel.const_int(0, false);
-    let is_zero = ctx
-        .builder
-        .build_int_compare(IntPredicate::EQ, exp, zero, "exp_check")?;
-
-    let else_label = format!("Instruction #{}: Exp / else", current.idx());
-    let then_label = format!("Instruction #{}: Exp / then", current.idx());
     let index = format!("_{}", current.idx());
-    let else_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &else_label, &index)?;
-    let then_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &then_label, &index)?;
 
-    ctx.builder.position_at_end(this.block);
-    ctx.builder
-        .build_conditional_branch(is_zero, then_block.block, else_block.block)?;
+    // SETUP BLOCK
+    let (a, exp, else_block, then_block) = {
+        let book = current.book();
+        let this = current.block();
 
-    else_block.add_incoming(&book, this);
-    then_block.add_incoming(&book, this);
+        let (book, a) = build_stack_pop!(ctx, book);
+        let (book, exp) = build_stack_pop!(ctx, book);
+
+        let is_zero = ctx
+            .builder
+            .build_int_compare(IntPredicate::EQ, exp, zero, "exp_check")?;
+
+        let else_label = format!("{}: Exp / else", current.idx());
+        let then_label = format!("{}: Exp / then", current.idx());
+        let else_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &else_label, &index)?;
+        let then_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &then_label, &index)?;
+
+        ctx.builder.position_at_end(this.block);
+        ctx.builder
+            .build_conditional_branch(is_zero, then_block.block, else_block.block)?;
+
+        else_block.add_incoming(&book, this);
+        then_block.add_incoming(&book, this);
+
+        (a, exp, else_block, then_block)
+    };
 
     //// THEN BLOCK
-    ctx.builder.position_at_end(then_block.block);
+    {
+        ctx.builder.position_at_end(then_block.block);
+        current.update_current_block(then_block);
 
-    let then_book = then_block.book();
-    let then_book = build_stack_push!(ctx, then_book, const_1);
+        // static gas only
+        build_gas_check_exp!(ctx, current);
 
-    next.add_incoming(&then_book, &then_block);
+        let then_book = current.book();
+        let then_book = build_stack_push!(ctx, then_book, const_1);
 
-    ctx.builder.build_unconditional_branch(next.block)?;
+        let next = current.next();
+        next.add_incoming(&then_book, &current.block());
+
+        ctx.builder.build_unconditional_branch(next.block)?;
+    }
 
     //// ELSE BLOCK
     ctx.builder.position_at_end(else_block.block);
+    current.update_current_block(else_block);
+
+    let const8 = ctx.types.type_i64.const_int(8, false);
+    let const1 = ctx.types.type_i64.const_int(1, false);
+
+    let msbyte = build_get_msbyte!(ctx, exp);
+    build_gas_check_exp!(ctx, current, msbyte);
+
+    let else_block = current.block();
     let else_book = else_block.book();
 
-    let const8 = ctx.types.type_ptrint.const_int(8, false);
-    let const1 = ctx.types.type_ptrint.const_int(1, false);
-    let msbyte = build_get_msbyte!(ctx, exp);
     let bit = ctx.builder.build_int_mul(msbyte, const8, "")?;
     let shift = ctx.builder.build_int_sub(bit, const1, "")?;
     let shift_cast = ctx
@@ -396,8 +421,8 @@ pub(crate) fn build_exp_op<'a, 'ctx>(
         .build_bitcast(const_1, ctx.types.type_stackel, "")?
         .into_int_value();
 
-    let loop_label = format!("Instruction #{}: Exp / loop", current.idx());
-    let loop_end_label = format!("Instruction #{}: Exp / loop_end", current.idx());
+    let loop_label = format!("{}: Exp / loop", current.idx());
+    let loop_end_label = format!("{}: Exp / loop_end", current.idx());
 
     let loop_block = JitEvmEngineSimpleBlock::new(ctx, else_block.block, &loop_label, &index)?;
     let loop_end_block =
@@ -443,17 +468,21 @@ pub(crate) fn build_exp_op<'a, 'ctx>(
     final_accum.add_incoming(&[(&accum, loop_block.block)]);
 
     let final_basic = final_accum.as_basic_value().into_int_value();
-    build_stack_push!(ctx, loop_end_book, final_basic);
-    ctx.builder.build_unconditional_branch(next.block)?;
+    let book = build_stack_push!(ctx, loop_end_book, final_basic);
 
-    next.add_incoming(&loop_end_book, &loop_end_block);
+    let next = current.next();
+
+    ctx.builder.build_unconditional_branch(next.block)?;
+    next.add_incoming(&book, &loop_end_block);
+
     Ok(())
 }
 
 pub(crate) fn build_not_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
+    build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
     let book = current.book();

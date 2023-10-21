@@ -11,6 +11,7 @@ mod context;
 mod cursor;
 mod error;
 mod ffi;
+pub mod gas;
 mod types;
 
 mod ops;

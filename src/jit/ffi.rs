@@ -1,6 +1,6 @@
 use crate::jit::{
     context::JitEvmPtrs,
-    contract::OperationsContext,
+    contract::BuilderContext,
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
     ops::{build_stack_check, build_stack_inc, build_stack_pop},
@@ -90,7 +90,7 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_print_u64(
         &self,
-        c: &OperationsContext<'ctx>,
+        c: &BuilderContext<'ctx>,
         val: IntValue<'ctx>,
         hex: bool,
     ) -> Result<(), JitEvmEngineError> {
@@ -106,7 +106,7 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub fn build_print_u256(
         &self,
-        c: &OperationsContext<'ctx>,
+        c: &BuilderContext<'ctx>,
         val: IntValue<'ctx>,
         hex: bool,
     ) -> Result<(), JitEvmEngineError> {
@@ -122,7 +122,7 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub(crate) fn build_sha3<'a>(
         &self,
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 2, 0);
@@ -158,7 +158,7 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub(crate) fn build_sload<'a>(
         &self,
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 1, 0);
@@ -184,7 +184,7 @@ impl<'ctx> HostFunctions<'ctx> {
 
     pub(crate) fn build_sstore<'a>(
         &self,
-        ctx: &OperationsContext<'ctx>,
+        ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 2, 0);

@@ -2,9 +2,10 @@ use crate::{
     code::EvmOp,
     constants::EVM_STACK_SIZE,
     jit::{
-        contract::JitContractBuilder, ExecutionResult, Halt, JitEvmEngineError,
+        contract::JitContractBuilder, gas, ExecutionResult, Halt, JitEvmEngineError,
         JitEvmExecutionContext, Success,
     },
+    spec::SpecId,
 };
 use paste::paste;
 use primitive_types::{H160, H256, U256};
@@ -34,46 +35,59 @@ fn test_jit(
 }
 
 macro_rules! expect_success {
-    ($fname:ident, $result:ident, $reason:expr) => {
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {
         let name_str = stringify!($fname);
 
         match $result {
-            ExecutionResult::Success { reason } => {
+            ExecutionResult::Success { reason, gas_used } => {
                 assert_eq!(
                     reason, $reason,
-                    "{}: expected {:?}, got {:?}",
+                    "expect_success - {}: expected {:?}, got {:?}",
                     name_str, $reason, reason
                 );
+                assert_eq!(
+                    gas_used, $gas,
+                    "expect_success - {}: incorrect gas usage.",
+                    name_str
+                );
             }
-            o => panic!("{}: Expected success, got: {:?}", name_str, o),
+            o => panic!(
+                "expect_success - {}: Expected success, got: {:?}",
+                name_str, o
+            ),
         }
     };
 }
 
-macro_rules! expect_revert {
-    ($fname:ident, $result:ident) => {
-        let name_str = stringify!($fname);
-
-        match $result {
-            ExecutionResult::Revert => {}
-            o => panic!("{}: Expected revert, got: {:?}", name_str, o),
-        }
-    };
-}
+//macro_rules! expect_revert {
+//    ($fname:ident, $result:ident) => {
+//        let name_str = stringify!($fname);
+//
+//        match $result {
+//            ExecutionResult::Revert => {}
+//            o => panic!("{}: Expected revert, got: {:?}", name_str, o),
+//        }
+//    };
+//}
 
 macro_rules! expect_halt {
-    ($fname:ident, $result:ident, $reason:expr) => {
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {
         let name_str = stringify!($fname);
 
         match $result {
-            ExecutionResult::Halt { reason } => {
+            ExecutionResult::Halt { reason, gas_used } => {
                 assert_eq!(
                     reason, $reason,
-                    "{}: expected {:?}, got {:?}",
+                    "expect_halt - {}: expected {:?}, got {:?}",
                     name_str, $reason, reason
                 );
+                assert_eq!(
+                    gas_used, $gas,
+                    "expect_halt - {}: incorrect gas usage.",
+                    name_str
+                );
             }
-            o => panic!("{}: Expected halt, got: {:?}", name_str, o),
+            o => panic!("expect_halt - {}: Expected halt, got: {:?}", name_str, o),
         }
     };
 }
@@ -85,25 +99,36 @@ macro_rules! expect_stack_overflow {
             fn [<operations_stack_overflow_ $fname>]() {
                 use crate::code::EvmOp::*;
 
+                let gas = gas::Gas::new(SpecId::LATEST);
+                let init_cost = gas.init_gas(&[]);
+                let push_gas = gas.const_cost(Push(32, U256::zero()));
+                let op_cost = gas.const_cost($evmop);
+
                 let mut ops = vec![Push(32, U256::zero()); EVM_STACK_SIZE];
 
-                for _ in 0..$stack_growth {
+                for i in 0..$stack_growth {
                     ops.push($evmop);
 
                     let mut ctx = JitEvmExecutionContext::new();
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
 
-                    expect_halt!($fname, result, Halt::StackOverflow);
+                    let pushes = (EVM_STACK_SIZE - i) as u64;
+                    let expected_gas = init_cost + pushes * push_gas + op_cost;
+
+                    expect_halt!($fname, result, Halt::StackOverflow, expected_gas);
 
                     ops.pop();
                     ops.pop();
                 }
                 ops.push($evmop);
 
+                let pushes = (EVM_STACK_SIZE - $stack_growth) as u64;
+                let expected_gas = init_cost + pushes * push_gas + op_cost;
+
                 let mut ctx = JitEvmExecutionContext::new();
                 let result = test_jit(ops, &mut ctx).expect("Contract build failed");
 
-                expect_success!($fname, result, Success::Stop);
+                expect_success!($fname, result, Success::Stop, expected_gas);
             }
         }
     };
@@ -116,25 +141,40 @@ macro_rules! expect_stack_underflow {
             fn [<operations_stack_underflow_ $fname>]() {
                 use crate::code::EvmOp::*;
 
+                let gas = gas::Gas::new(SpecId::LATEST);
+                let push_gas = gas.const_cost(Push(32, U256::zero()));
+                let init_cost = gas.init_gas(&[]);
+
+                let op_cost = if gas.is_const_gas($evmop) {
+                    gas.const_cost($evmop)
+                } else {
+                    // TODO: non-const gas ops
+                    0
+                };
+
                 let mut ops = Vec::new();
 
                 for i in 0..$min_stack {
                     let mut cloned = ops.clone();
                     cloned.push($evmop);
 
+                    let expected_gas = init_cost + push_gas * i + op_cost;
+
                     let mut ctx = JitEvmExecutionContext::new();
                     let result = test_jit(cloned, &mut ctx).expect("Contract build failed");
 
-                    expect_halt!($fname, result, Halt::StackUnderflow);
+                    expect_halt!($fname, result, Halt::StackUnderflow, expected_gas);
 
                     ops.push(Push(32, U256::one()*i));
                 }
                 ops.push($evmop);
 
+                let expected_gas = init_cost + push_gas * $min_stack + op_cost;
+
                 let mut ctx = JitEvmExecutionContext::new();
                 let result = test_jit(ops, &mut ctx).expect("Contract build failed");
 
-                expect_success!($fname, result, Success::Stop);
+                expect_success!($fname, result, Success::Stop, expected_gas);
             }
         }
     };
@@ -161,7 +201,9 @@ macro_rules! check_context {
 
             let result = test_jit(ops, &mut context).expect("Contract build failed");
 
-            expect_success!($setter, result, Success::Stop);
+            // TODO: need context gas
+            let expected_gas = 0;
+            expect_success!($setter, result, Success::Stop, expected_gas);
 
             let JitEvmExecutionContext {
                 storage, memory, ..
@@ -267,7 +309,9 @@ fn operations_jit_test_stop() {
         ops.push(EvmOp::Sstore);
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_stop, result, Success::Stop);
+        //TODO: need to do stop gas
+        let expected_gas = 0;
+        expect_success!(test_stop, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -335,7 +379,9 @@ fn operations_test_jump() {
         ops.push(EvmOp::Sstore);
 
         let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
-        expect_success!(test_jump, result, Success::Stop);
+        // TODO: need to do jump gas
+        let expected_gas = 0;
+        expect_success!(test_jump, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -354,11 +400,14 @@ fn operations_test_jump() {
 
 #[test]
 fn test_jump_underflow() {
+    let gas = gas::Gas::new(SpecId::LATEST);
+    let init_cost = gas.init_gas(&[]);
+    let expected_gas = init_cost + gas.const_cost(EvmOp::Jump);
     let mut execution_context = JitEvmExecutionContext::new();
 
     let ops = vec![EvmOp::Jump, EvmOp::Jumpdest];
     let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
-    expect_halt!(jump_underflow, result, Halt::StackUnderflow);
+    expect_halt!(jump_underflow, result, Halt::StackUnderflow, expected_gas);
 }
 
 #[test]
@@ -432,7 +481,9 @@ fn operations_test_jumpi() {
         ops.push(EvmOp::Sstore);
 
         let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
-        expect_success!(test_jumpi, result, Success::Stop);
+        // TODO: need to do jump gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_jumpi, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -451,11 +502,13 @@ fn operations_test_jumpi() {
 
 #[test]
 fn test_jumpi_underflow() {
+    // TODO: need to do jump gas accounting.
+    let expected_gas = 0;
     let mut execution_context = JitEvmExecutionContext::new();
 
     let ops = vec![EvmOp::Jumpi, EvmOp::Jumpdest];
     let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
-    expect_halt!(jumpi_underflow1, result, Halt::StackUnderflow);
+    expect_halt!(jumpi_underflow1, result, Halt::StackUnderflow, expected_gas);
 
     let mut execution_context = JitEvmExecutionContext::new();
 
@@ -466,7 +519,7 @@ fn test_jumpi_underflow() {
         EvmOp::Jumpdest,
     ];
     let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
-    expect_halt!(jumpi_underflow2, result, Halt::StackUnderflow);
+    expect_halt!(jumpi_underflow2, result, Halt::StackUnderflow, expected_gas);
 }
 
 #[test]
@@ -516,7 +569,9 @@ fn operations_test_augmented_jump() {
     ops.push(EvmOp::Sstore);
 
     let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
-    expect_success!(augmented_jump, result, Success::Stop);
+    // TODO: need to do augmented jump gas accounting.
+    let expected_gas = 0;
+    expect_success!(augmented_jump, result, Success::Stop, expected_gas);
 
     let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -600,7 +655,9 @@ fn operations_test_augmented_jumpi() {
         ops.push(EvmOp::Sstore);
 
         let result = test_jit(ops.clone(), &mut execution_context).expect("Should be Ok()");
-        expect_success!(augmented_jumpi, result, Success::Stop);
+        // TODO: need to do jumpi gas accounting.
+        let expected_gas = 0;
+        expect_success!(augmented_jumpi, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -649,7 +706,9 @@ fn operations_jit_test_sha3() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_sha3, result, Success::Stop);
+        // TODO: need to do sha3 gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_sha3, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -691,7 +750,9 @@ fn operations_jit_test_sstore() {
 
         let mut execution_context = JitEvmExecutionContext::new();
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_sstore, result, Success::Stop);
+        // TODO: need to do storage hot/cold tracking for the gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_sstore, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { storage, .. } = execution_context;
 
@@ -736,7 +797,9 @@ fn operations_jit_test_sload() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_sload, result, Success::Stop);
+        // TODO: need to do storage hot/cold tracking for the gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_sload, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -780,7 +843,9 @@ fn operations_jit_test_mload() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_mload, result, Success::Stop);
+        // TODO: need to do memory growth tracking for the gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_mload, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { stack, .. } = execution_context;
 
@@ -819,7 +884,9 @@ fn operations_jit_test_mstore8() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_mstore8, result, Success::Stop);
+        // TODO: need to do memory growth tracking for the gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_mstore8, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -858,7 +925,9 @@ fn operations_jit_test_mstore() {
         }
 
         let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        expect_success!(test_mstore, result, Success::Stop);
+        // TODO: need to do memory growth tracking for the gas accounting.
+        let expected_gas = 0;
+        expect_success!(test_mstore, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
 
@@ -879,17 +948,23 @@ macro_rules! test_op1 {
             #[test]
             fn [<operations_jit_equivalence_ $fname>]() {
                 use crate::code::EvmOp::*;
-                use operations;
+                use operations::*;
 
                 fn _test(a: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
+
+                    let gas = gas::Gas::new(SpecId::LATEST);
+                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let op_cost = gas.const_cost($evmop);
+                    let init_cost = gas.init_gas(&[]);
+                    let expected_gas = init_cost + push_cost + op_cost;
 
                     let result = test_jit(vec![
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
 
-                    expect_success!($fname, result, Success::Stop);
+                    expect_success!($fname, result, Success::Stop, expected_gas);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
@@ -914,6 +989,95 @@ macro_rules! test_op1 {
     };
 }
 
+#[test]
+fn operations_jit_equivalence_exp() {
+    use crate::code::EvmOp::*;
+    use operations;
+
+    fn _test(a: U256, b: U256) {
+        let mut ctx = JitEvmExecutionContext::new();
+
+        let gas = gas::Gas::new(SpecId::LATEST);
+        let push_cost = gas.const_cost(Push(32, U256::zero()));
+        let (base, exp) = gas.exp_cost();
+        let init_cost = gas.init_gas(&[]);
+
+        let zeros = (256 - b.leading_zeros()) as u64;
+        let bytes = (zeros / 8) + if zeros % 8 == 0 { 0 } else { 1 };
+        let expected_gas = init_cost + push_cost * 2 + base + exp * bytes;
+
+        let result = test_jit(vec![Push(32, b), Push(32, a), EvmOp::Exp], &mut ctx)
+            .expect("Contract build failed");
+
+        expect_success!(equivalence_exp, result, Success::Stop, expected_gas);
+
+        let JitEvmExecutionContext { stack, .. } = ctx;
+        let d = stack[0];
+        let d_ = operations::exp(a, b);
+        if d != d_ {
+            println!("a = {:?} / b = {:?} \n\n d = {:?} / d' = {:?}", a, b, d, d_);
+        }
+        assert_eq!(d, d_);
+    }
+
+    _test(U256::zero(), U256::zero());
+    _test(U256::zero(), U256::one());
+    _test(U256::one(), U256::zero());
+    _test(U256::one(), U256::one());
+
+    for _i in 0..1000 {
+        let a = rand::thread_rng().gen::<[u8; 32]>();
+        let b = rand::thread_rng().gen::<[u8; 32]>();
+        let a = U256::from_big_endian(&a);
+        let b = U256::from_big_endian(&b);
+        _test(a, b);
+    }
+}
+
+#[test]
+fn operations_underflow_exp() {
+    use crate::code::EvmOp::*;
+
+    let gas = gas::Gas::new(SpecId::LATEST);
+    let push_gas = gas.const_cost(Push(32, U256::zero()));
+    let init_cost = gas.init_gas(&[]);
+    let (base, exp) = gas.exp_cost();
+
+    let mut ops = Vec::new();
+
+    for i in 0..2 {
+        let mut cloned = ops.clone();
+        cloned.push(EvmOp::Exp);
+
+        let expected_gas = init_cost + push_gas * i;
+
+        let mut ctx = JitEvmExecutionContext::new();
+        let result = test_jit(cloned, &mut ctx).expect("Contract build failed");
+
+        expect_halt!(
+            operations_underflow_exp,
+            result,
+            Halt::StackUnderflow,
+            expected_gas
+        );
+
+        ops.push(Push(32, U256::one() * (i + 1)));
+    }
+    ops.push(EvmOp::Exp);
+
+    let expected_gas = init_cost + push_gas * 2 + base + exp;
+
+    let mut ctx = JitEvmExecutionContext::new();
+    let result = test_jit(ops, &mut ctx).expect("Contract build failed");
+
+    expect_success!(
+        operations_underflow_exp,
+        result,
+        Success::Stop,
+        expected_gas
+    );
+}
+
 macro_rules! test_op2 {
     ($fname:ident, $evmop:expr, $opname:expr) => {
         paste! {
@@ -925,13 +1089,19 @@ macro_rules! test_op2 {
                 fn _test(a: U256, b: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
 
+                    let gas = gas::Gas::new(SpecId::LATEST);
+                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let op_cost = gas.const_cost($evmop);
+                    let init_cost = gas.init_gas(&[]);
+                    let expected_gas = init_cost + push_cost * 2 + op_cost;
+
                     let result = test_jit(vec![
                         Push(32, b),
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
 
-                    expect_success!($fname, result, Success::Stop);
+                    expect_success!($fname, result, Success::Stop, expected_gas);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
@@ -971,13 +1141,19 @@ macro_rules! test_op2_small {
                 fn _test(a: U256, b: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
 
+                    let gas = gas::Gas::new(SpecId::LATEST);
+                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let op_cost = gas.const_cost($evmop);
+                    let init_cost = gas.init_gas(&[]);
+                    let expected_gas = init_cost + push_cost * 2 + op_cost;
+
                     let result = test_jit(vec![
                         Push(32, b),
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
 
-                    expect_success!($fname, result, Success::Stop);
+                    expect_success!($fname, result, Success::Stop, expected_gas);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
@@ -1020,6 +1196,12 @@ macro_rules! test_op_dup {
                 fn _test(values: Vec<U256>) {
                     let original_stack = values.clone();
 
+                    let gas = gas::Gas::new(SpecId::LATEST);
+                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let op_cost = gas.const_cost($evmop);
+                    let init_cost = gas.init_gas(&[]);
+                    let expected_gas = init_cost + push_cost * values.len() as u64 + op_cost;
+
                     let mut ops = values
                         .into_iter()
                         .map(|v| Push(32, v))
@@ -1029,7 +1211,7 @@ macro_rules! test_op_dup {
 
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
 
-                    expect_success!($fname, result, Success::Stop);
+                    expect_success!($fname, result, Success::Stop, expected_gas);
                     let JitEvmExecutionContext { stack, .. } = ctx;
 
                     let d = &stack[..original_stack.len() + 1];
@@ -1066,6 +1248,12 @@ macro_rules! test_op_swap {
                 fn _test(values: Vec<U256>) {
                     let original_stack = values.clone();
 
+                    let gas = gas::Gas::new(SpecId::LATEST);
+                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let op_cost = gas.const_cost($evmop);
+                    let init_cost = gas.init_gas(&[]);
+                    let expected_gas = init_cost + push_cost * values.len() as u64 + op_cost;
+
                     let mut ops = values
                         .into_iter()
                         .map(|v| Push(32, v))
@@ -1074,7 +1262,7 @@ macro_rules! test_op_swap {
 
                     let mut ctx = JitEvmExecutionContext::new();
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
-                    expect_success!($fname, result, Success::Stop);
+                    expect_success!($fname, result, Success::Stop, expected_gas);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = &stack[..original_stack.len()];
@@ -1116,6 +1304,12 @@ macro_rules! test_op3 {
                 fn _test(a: U256, b: U256, c: U256) {
                     let mut ctx = JitEvmExecutionContext::new();
 
+                    let gas = gas::Gas::new(SpecId::LATEST);
+                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let op_cost = gas.const_cost($evmop);
+                    let init_cost = gas.init_gas(&[]);
+                    let expected_gas = init_cost + push_cost * 3 + op_cost;
+
                     let result = test_jit(vec![
                         Push(32, c),
                         Push(32, b),
@@ -1123,7 +1317,7 @@ macro_rules! test_op3 {
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
 
-                    expect_success!($fname, result, Success::Stop);
+                    expect_success!($fname, result, Success::Stop, expected_gas);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;
                     let d = stack[0];
@@ -1160,6 +1354,7 @@ macro_rules! test_op3 {
 }
 
 test_op1!(iszero, EvmOp::Iszero, operations::iszero);
+test_op1!(not, EvmOp::Not, operations::not);
 test_op2!(add, EvmOp::Add, operations::add);
 test_op2!(sub, EvmOp::Sub, operations::sub);
 test_op2!(mul, EvmOp::Mul, operations::mul);
@@ -1171,21 +1366,17 @@ test_op2!(lt, EvmOp::Lt, operations::lt);
 test_op2!(gt, EvmOp::Gt, operations::gt);
 test_op2!(slt, EvmOp::Slt, operations::slt);
 test_op2!(sgt, EvmOp::Sgt, operations::sgt);
-
-test_op3!(addmod, EvmOp::Addmod, operations::addmod);
-test_op3!(mulmod, EvmOp::Mulmod, operations::mulmod);
-test_op2!(exp, EvmOp::Exp, operations::exp);
-
 test_op2!(and, EvmOp::And, operations::and);
 test_op2!(or, EvmOp::Or, operations::or);
 test_op2!(xor, EvmOp::Xor, operations::xor);
+test_op2!(smod, EvmOp::Smod, operations::smod);
 test_op2_small!(shl, EvmOp::Shl, operations::shl);
 test_op2_small!(shr, EvmOp::Shr, operations::shr);
 test_op2_small!(sar, EvmOp::Sar, operations::sar);
 test_op2_small!(signextend, EvmOp::Signextend, operations::signextend);
 test_op2_small!(byte, EvmOp::Byte, operations::byte);
-test_op2!(smod, EvmOp::Smod, operations::smod);
-test_op1!(not, EvmOp::Not, operations::not);
+test_op3!(addmod, EvmOp::Addmod, operations::addmod);
+test_op3!(mulmod, EvmOp::Mulmod, operations::mulmod);
 test_op_dup!(dup1, EvmOp::Dup1, 1);
 test_op_dup!(dup2, EvmOp::Dup2, 2);
 test_op_dup!(dup3, EvmOp::Dup3, 3);

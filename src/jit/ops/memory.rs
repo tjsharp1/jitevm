@@ -2,13 +2,13 @@ use crate::jit::ops::{
     build_stack_check, build_stack_pop, build_stack_pop_vector, build_stack_push_vector,
 };
 use crate::jit::{
-    contract::OperationsContext, cursor::CurrentInstruction, JitEvmEngineError, EVM_JIT_STACK_ALIGN,
+    contract::BuilderContext, cursor::CurrentInstruction, JitEvmEngineError, EVM_JIT_STACK_ALIGN,
 };
 use inkwell::{values::BasicValue, AddressSpace};
 
 // TODO: memory growth checks
 pub(crate) fn build_mstore_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
@@ -42,7 +42,7 @@ pub(crate) fn build_mstore_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_mstore8_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
@@ -71,7 +71,7 @@ pub(crate) fn build_mstore8_op<'a, 'ctx>(
 }
 
 pub(crate) fn build_mload_op<'a, 'ctx>(
-    ctx: &OperationsContext<'ctx>,
+    ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 1, 0);

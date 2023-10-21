@@ -129,6 +129,6 @@ macro_rules! build_get_msbyte {
             .into_int_value();
         let byte_count = $ctx.builder.build_int_add(byte_count, to_add, "")?;
         $ctx.builder
-            .build_int_cast(byte_count, $ctx.types.type_ptrint, "")?
+            .build_int_cast(byte_count, $ctx.types.type_i64, "")?
     }};
 }
