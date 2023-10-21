@@ -1,7 +1,6 @@
 use inkwell::context::Context;
-use jitevm::code::EvmCode;
+use jitevm::code::{EvmCode, EvmOpParserMode};
 use jitevm::jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, Success};
-use jitevm::test_data;
 use primitive_types::U256;
 use revm::{
     db::in_memory_db::BenchmarkDB,
@@ -10,6 +9,8 @@ use revm::{
     },
     EVM,
 };
+use std::path::PathBuf;
+
 
 fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
     let context = Context::create();
@@ -48,13 +49,24 @@ fn test_evm_with_code(code: EvmCode) -> ResultAndState {
     evm.transact().expect("Bad evm stuff")
 }
 
+fn load_evm_code(test_name: &str) -> EvmCode {
+    let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
+	let mut path = PathBuf::new();
+	path.push(test_base_dir);
+	path.push("contracts");
+	path.push(format!("{}.bc", test_name));
+
+	let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
+	let bytes = hex::decode(bytecode).expect("Invalid hex data");
+
+	EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
+}
+
 macro_rules! assert_evm_jit_equivalence {
     ($test_data:ident) => {
         let name = stringify!($test_data);
+        let code = load_evm_code(name);
 
-        let ops = test_data::$test_data();
-
-        let code = EvmCode { ops: ops.clone() };
         let jit_result = test_jit_with_code(code.clone());
         let ResultAndState { result, state } = test_evm_with_code(code);
 
@@ -85,6 +97,6 @@ macro_rules! assert_evm_jit_equivalence {
 
 #[test]
 fn test_evm_and_jit() {
-    assert_evm_jit_equivalence!(get_code_ops_fibonacci);
-    assert_evm_jit_equivalence!(get_code_ops_fibonacci_repetitions);
+    assert_evm_jit_equivalence!(fibonacci);
+    assert_evm_jit_equivalence!(fibonacci_repetitions);
 }

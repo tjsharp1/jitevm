@@ -1,0 +1,29 @@
+#define macro MAIN() = {
+    0xc350                   // [ITERATIONS]  (50,000)
+top:
+    dup1 iszero              // [ITERATIONS == 0, ITERATIONS]
+	end jumpi                // [ITERATIONS]
+	0x01 swap1               // [ITERATIONS, 0x01]
+	sub                      // [ITERATIONS]     ITERATIONS = ITERATIONS - 1
+
+    0x01f4                   // [N, ITERATIONS] (500)
+    0x00                     // [I_1, N, ITERATIONS]
+    0x01                     // [I, I_1, N, ITERATIONS]
+
+mainloop:
+    dup3                     // [N, I, I_1, N, ITERATIONS]
+	iszero cleanup jumpi     // [I, I_1, N, ITERATIONS]
+	dup2 dup2                // [I, I_1, I, I_1, N, ITERATIONS]
+	add                      // [A, I, I_1, N, ITERATIONS]      ( A = I + I_1 )
+	swap2 pop swap1          // [I, I_1, N, ITERATIONS]         ( I_1 = I, I = A )
+	swap2 0x01 swap1         // [N, 0x01, I_1, I, ITERATIONS]
+	sub                      // [N - 1, I_1, I, ITERATIONS]
+	swap2                    // [I, I_1, N - 1, ITERATIONS]
+	mainloop jump
+cleanup:
+    swap2                    // [N, I-1, I, ITERATIONS]
+	pop pop pop              // [ITERATIONS]
+	top jump                 // [ITERATIONS]
+end:
+	stop                     // []
+}

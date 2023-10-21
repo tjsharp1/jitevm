@@ -5,12 +5,25 @@ use jitevm::jit::{
     contract::{JitContractBuilder, JitEvmContract},
     JitEvmExecutionContext,
 };
-use jitevm::test_data;
 use revm::{
     db::in_memory_db::BenchmarkDB,
     primitives::{address, Address, Bytecode, Bytes, Env, U256},
     EVM,
 };
+use std::path::PathBuf;
+
+fn load_evm_code(test_name: &str) -> EvmCode {
+    let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
+	let mut path = PathBuf::new();
+	path.push(test_base_dir);
+	path.push("contracts");
+	path.push(format!("{}.bc", test_name));
+
+	let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
+	let bytes = hex::decode(bytecode).expect("Invalid hex data");
+
+	EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
+}
 
 fn interp_get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
     let bytes = Bytes::copy_from_slice(&code.to_bytes());
@@ -24,12 +37,10 @@ fn interp_get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
 }
 
 pub fn evm_benchmark(c: &mut Criterion) {
-    let ops = test_data::get_code_ops_fibonacci();
-    let code = EvmCode { ops: ops.clone() };
+    let code = load_evm_code("fibonacci");
     let args1 = interp_get_env_args(code);
 
-    let ops = test_data::get_code_ops_fibonacci_repetitions();
-    let code = EvmCode { ops: ops.clone() };
+    let code = load_evm_code("fibonacci_repetitions");
     let args2 = interp_get_env_args(code);
 
     let mut group = c.benchmark_group("Interpreter benchmarks");
@@ -46,15 +57,13 @@ pub fn evm_benchmark(c: &mut Criterion) {
 pub fn jitevm_benchmark(c: &mut Criterion) {
     let context = Context::create();
 
-    let ops = test_data::get_code_ops_fibonacci();
-    let code = EvmCode { ops: ops.clone() };
+    let code = load_evm_code("fibonacci");
     let contract1 = JitContractBuilder::with_context("contract1", &context)
         .expect("Could not build builder")
         .build(code.augment().index())
         .expect("Could not JIT contract");
 
-    let ops = test_data::get_code_ops_fibonacci_repetitions();
-    let code = EvmCode { ops: ops.clone() };
+    let code = load_evm_code("fibonacci_repetitions");
     let contract2 = JitContractBuilder::with_context("contract2", &context)
         .expect("Could not build builder")
         .build(code.augment().index())
