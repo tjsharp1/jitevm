@@ -6,7 +6,7 @@ top:
 	0x01 swap1               // [ITERATIONS, 0x01]
 	sub                      // [ITERATIONS]     ITERATIONS = ITERATIONS - 1
 
-    0x01f4                   // [N, ITERATIONS] (500)
+    0xfa                     // [N, ITERATIONS] (250)
     0x00                     // [I_1, N, ITERATIONS]
     0x01                     // [I, I_1, N, ITERATIONS]
 

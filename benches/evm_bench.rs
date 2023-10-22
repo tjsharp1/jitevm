@@ -14,15 +14,15 @@ use std::path::PathBuf;
 
 fn load_evm_code(test_name: &str) -> EvmCode {
     let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
-	let mut path = PathBuf::new();
-	path.push(test_base_dir);
-	path.push("contracts");
-	path.push(format!("{}.bc", test_name));
+    let mut path = PathBuf::new();
+    path.push(test_base_dir);
+    path.push("contracts");
+    path.push(format!("{}.bc", test_name));
 
-	let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
-	let bytes = hex::decode(bytecode).expect("Invalid hex data");
+    let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
+    let bytes = hex::decode(bytecode).expect("Invalid hex data");
 
-	EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
+    EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
 }
 
 fn interp_get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
@@ -43,11 +43,17 @@ pub fn evm_benchmark(c: &mut Criterion) {
     let code = load_evm_code("fibonacci_repetitions");
     let args2 = interp_get_env_args(code);
 
+    let code = load_evm_code("exp");
+    let args3 = interp_get_env_args(code);
+
     let mut group = c.benchmark_group("Interpreter benchmarks");
     group.bench_with_input(BenchmarkId::new("Interpreter bench", 0), &args1, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
     group.bench_with_input(BenchmarkId::new("Interpreter bench", 1), &args2, |b, i| {
+        b.iter(|| interpreter_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("Interpreter bench", 2), &args3, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
 
@@ -69,11 +75,20 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
         .build(code.augment().index())
         .expect("Could not JIT contract");
 
+    let code = load_evm_code("exp");
+    let contract3 = JitContractBuilder::with_context("contract3", &context)
+        .expect("Could not build builder")
+        .build(code.augment().index())
+        .expect("Could not JIT contract");
+
     let mut group = c.benchmark_group("JIT benchmarks");
     group.bench_with_input(BenchmarkId::new("Jit bench", 0), &contract1, |b, i| {
         b.iter(|| jitevm_bench(i))
     });
     group.bench_with_input(BenchmarkId::new("Jit bench", 1), &contract2, |b, i| {
+        b.iter(|| jitevm_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("Jit bench", 2), &contract3, |b, i| {
         b.iter(|| jitevm_bench(i))
     });
     group.finish();

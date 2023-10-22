@@ -11,7 +11,6 @@ use revm::{
 };
 use std::path::PathBuf;
 
-
 fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
     let context = Context::create();
     let contract = JitContractBuilder::with_context("contract", &context)
@@ -51,15 +50,15 @@ fn test_evm_with_code(code: EvmCode) -> ResultAndState {
 
 fn load_evm_code(test_name: &str) -> EvmCode {
     let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
-	let mut path = PathBuf::new();
-	path.push(test_base_dir);
-	path.push("contracts");
-	path.push(format!("{}.bc", test_name));
+    let mut path = PathBuf::new();
+    path.push(test_base_dir);
+    path.push("contracts");
+    path.push(format!("{}.bc", test_name));
 
-	let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
-	let bytes = hex::decode(bytecode).expect("Invalid hex data");
+    let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
+    let bytes = hex::decode(bytecode).expect("Invalid hex data");
 
-	EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
+    EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
 }
 
 macro_rules! assert_evm_jit_equivalence {
