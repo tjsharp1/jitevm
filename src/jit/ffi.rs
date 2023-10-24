@@ -3,6 +3,7 @@ use crate::jit::{
     contract::BuilderContext,
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
+    gas::{build_sha3_gas_check, memory_expansion_cost},
     ops::{build_stack_check, build_stack_inc, build_stack_pop},
     types::JitTypes,
 };
@@ -130,6 +131,9 @@ impl<'ctx> HostFunctions<'ctx> {
         let book = current.book();
         let (book, offset) = build_stack_pop!(ctx, book);
         let (book, size) = build_stack_pop!(ctx, book);
+        build_sha3_gas_check!(ctx, current, book, offset, size);
+
+        let book = current.book();
 
         let offset = ctx
             .builder

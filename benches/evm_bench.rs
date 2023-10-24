@@ -46,14 +46,34 @@ pub fn evm_benchmark(c: &mut Criterion) {
     let code = load_evm_code("exp");
     let args3 = interp_get_env_args(code);
 
-    let mut group = c.benchmark_group("Interpreter benchmarks");
-    group.bench_with_input(BenchmarkId::new("Interpreter bench", 0), &args1, |b, i| {
+    let code = load_evm_code("mload");
+    let args4 = interp_get_env_args(code);
+
+    let code = load_evm_code("mstore8");
+    let args5 = interp_get_env_args(code);
+
+    let code = load_evm_code("sha3");
+    let args6 = interp_get_env_args(code);
+
+    let mut group = c.benchmark_group("REVM benchmarks");
+    group.bench_with_input(BenchmarkId::new("REVM", "fibonacci"), &args1, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
-    group.bench_with_input(BenchmarkId::new("Interpreter bench", 1), &args2, |b, i| {
+    group.bench_with_input(
+        BenchmarkId::new("REVM", "fibonacci_repetitions"),
+        &args2,
+        |b, i| b.iter(|| interpreter_bench(i)),
+    );
+    group.bench_with_input(BenchmarkId::new("REVM", "exp"), &args3, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
-    group.bench_with_input(BenchmarkId::new("Interpreter bench", 2), &args3, |b, i| {
+    group.bench_with_input(BenchmarkId::new("REVM", "mload"), &args4, |b, i| {
+        b.iter(|| interpreter_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("REVM", "mstore8"), &args5, |b, i| {
+        b.iter(|| interpreter_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("REVM", "sha3"), &args6, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
 
@@ -81,14 +101,43 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
         .build(code.augment().index())
         .expect("Could not JIT contract");
 
+    let code = load_evm_code("mload");
+    let contract4 = JitContractBuilder::with_context("contract4", &context)
+        .expect("Could not build builder")
+        .build(code.augment().index())
+        .expect("Could not JIT contract");
+
+    let code = load_evm_code("mstore8");
+    let contract5 = JitContractBuilder::with_context("contract5", &context)
+        .expect("Could not build builder")
+        .build(code.augment().index())
+        .expect("Could not JIT contract");
+
+    let code = load_evm_code("sha3");
+    let contract6 = JitContractBuilder::with_context("contract6", &context)
+        .expect("Could not build builder")
+        .build(code.augment().index())
+        .expect("Could not JIT contract");
+
     let mut group = c.benchmark_group("JIT benchmarks");
-    group.bench_with_input(BenchmarkId::new("Jit bench", 0), &contract1, |b, i| {
+    group.bench_with_input(BenchmarkId::new("JIT", "fibonacci"), &contract1, |b, i| {
         b.iter(|| jitevm_bench(i))
     });
-    group.bench_with_input(BenchmarkId::new("Jit bench", 1), &contract2, |b, i| {
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "fibonacci_repetitions"),
+        &contract2,
+        |b, i| b.iter(|| jitevm_bench(i)),
+    );
+    group.bench_with_input(BenchmarkId::new("JIT", "exp"), &contract3, |b, i| {
         b.iter(|| jitevm_bench(i))
     });
-    group.bench_with_input(BenchmarkId::new("Jit bench", 2), &contract3, |b, i| {
+    group.bench_with_input(BenchmarkId::new("JIT", "mload"), &contract4, |b, i| {
+        b.iter(|| jitevm_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("JIT", "mstore8"), &contract5, |b, i| {
+        b.iter(|| jitevm_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("JIT", "sha3"), &contract6, |b, i| {
         b.iter(|| jitevm_bench(i))
     });
     group.finish();

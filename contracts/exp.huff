@@ -1,15 +1,14 @@
 #define macro MAIN() = {
     0xc350                   // [N] (50,000)
 mainloop:
-	dup1 iszero               // [N == 0, N]
+	dup1 iszero              // [N == 0, N]
 	cleanup jumpi            // [N]
-	dup1 0x20 exp             // [exp, N]
-	dup1 0xfeed exp           // [exp1, exp2, N]
-	add                      // [exp, N]
-	0x20 swap1 exp           // [exp, N]
-	0x60 swap1 exp           // [exp, N]
-	0xf00d swap1 exp         // [exp, N]
-	0x1337 exp               // [exp, N]
+	dup1 0x20 exp            // [exp, N]
+	0x30 exp                 // [exp, N]
+	0x40 exp                 // [exp, N]
+	0x50 exp                 // [exp, N]
+	0x60 exp                 // [exp, N]
+	0x70 exp                 // [exp, N]
 	pop 0x01 swap1           // [N, 1]
 	sub                      // [N - 1]
 	mainloop jump

@@ -33,9 +33,19 @@ pub struct JitEvmEngineBookkeeping<'ctx> {
     pub gas_remaining: IntValue<'ctx>,
     pub sp: IntValue<'ctx>,
     pub mem: IntValue<'ctx>,
+    pub mem_size: IntValue<'ctx>,
+    pub mem_gas: IntValue<'ctx>,
 }
 
 impl<'ctx> JitEvmEngineBookkeeping<'ctx> {
+    pub fn update_mem_gas(&self, mem_gas: IntValue<'ctx>, mem_size: IntValue<'ctx>) -> Self {
+        Self {
+            mem_gas,
+            mem_size,
+            ..*self
+        }
+    }
+
     pub fn update_sp(&self, sp: IntValue<'ctx>) -> Self {
         Self { sp, ..*self }
     }
@@ -57,6 +67,8 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
     pub phi_gas_remaining: PhiValue<'ctx>,
     pub phi_sp: PhiValue<'ctx>,
     pub phi_mem: PhiValue<'ctx>,
+    pub phi_mem_size: PhiValue<'ctx>,
+    pub phi_mem_gas: PhiValue<'ctx>,
     pub phi_error: Option<PhiValue<'ctx>>,
 }
 
@@ -87,6 +99,12 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         let phi_mem = ctx
             .builder
             .build_phi(ctx.types.type_i64, &format!("mem{}", suffix))?;
+        let phi_mem_size = ctx
+            .builder
+            .build_phi(ctx.types.type_i64, &format!("mem_size{}", suffix))?;
+        let phi_mem_gas = ctx
+            .builder
+            .build_phi(ctx.types.type_i64, &format!("mem_gas{}", suffix))?;
 
         Ok(Self {
             block,
@@ -96,6 +114,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             phi_gas_remaining,
             phi_sp,
             phi_mem,
+            phi_mem_size,
+            phi_mem_gas,
             phi_error: None,
         })
     }
@@ -124,6 +144,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             gas_remaining: self.phi_gas_remaining.as_basic_value().into_int_value(),
             sp: self.phi_sp.as_basic_value().into_int_value(),
             mem: self.phi_mem.as_basic_value().into_int_value(),
+            mem_size: self.phi_mem_size.as_basic_value().into_int_value(),
+            mem_gas: self.phi_mem_gas.as_basic_value().into_int_value(),
         }
     }
 
@@ -136,6 +158,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             .add_incoming(&[(&book.gas_remaining, *prev)]);
         self.phi_sp.add_incoming(&[(&book.sp, *prev)]);
         self.phi_mem.add_incoming(&[(&book.mem, *prev)]);
+        self.phi_mem_size.add_incoming(&[(&book.mem_size, *prev)]);
+        self.phi_mem_gas.add_incoming(&[(&book.mem_gas, *prev)]);
     }
 
     pub fn add_incoming(
@@ -151,6 +175,10 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             .add_incoming(&[(&book.gas_remaining, prev.block)]);
         self.phi_sp.add_incoming(&[(&book.sp, prev.block)]);
         self.phi_mem.add_incoming(&[(&book.mem, prev.block)]);
+        self.phi_mem_size
+            .add_incoming(&[(&book.mem_size, prev.block)]);
+        self.phi_mem_gas
+            .add_incoming(&[(&book.mem_gas, prev.block)]);
     }
 }
 

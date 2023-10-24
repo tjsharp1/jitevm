@@ -202,6 +202,8 @@ impl<'ctx> InstructionCursor<'ctx> {
                 .builder
                 .build_load(ctx.types.type_ptrint, mem_ptr, "mem")?
                 .into_int_value();
+            let mem_size = ctx.types.type_i64.const_int(0, false);
+            let mem_gas = ctx.types.type_i64.const_int(0, false);
 
             JitEvmEngineBookkeeping {
                 execution_context: execution_context,
@@ -210,6 +212,8 @@ impl<'ctx> InstructionCursor<'ctx> {
                 gas_remaining,
                 sp: sp_int,
                 mem,
+                mem_size,
+                mem_gas,
             }
         };
 

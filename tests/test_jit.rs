@@ -16,6 +16,7 @@ fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
     let contract = JitContractBuilder::with_context("contract", &context)
         .expect("Could not build builder")
         .debug_ir("evm_equivalence.ll")
+        .debug_asm("evm_equivalence.asm")
         .build(code.augment().index())
         .expect("Could not JIT contract");
 
@@ -24,12 +25,6 @@ fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
     let result = contract
         .call(&mut holder)
         .expect("JIT contract call failed");
-    // TJDEBUG ///////////////////////////////////
-    let JitEvmExecutionContext { storage, .. } = holder;
-    println!("TJDEBUG {:#?}", storage.keys());
-    println!("TJDEBUG {:#?}", storage.values());
-    //println!("TJDEBUG {:x}", storage.get(&U256::zero()).unwrap());
-    // TJDEBUG ///////////////////////////////////
     result
 }
 
@@ -69,6 +64,7 @@ macro_rules! assert_evm_jit_equivalence {
         let jit_result = test_jit_with_code(code.clone());
         let ResultAndState { result, state } = test_evm_with_code(code);
 
+        println!("TJDEBUG evmresult {:#?}", result);
         match result {
             REVMExecutionResult::Success {
                 reason, gas_used, ..
@@ -95,7 +91,31 @@ macro_rules! assert_evm_jit_equivalence {
 }
 
 #[test]
-fn test_evm_and_jit() {
+fn test_evm_and_jit_fibonacci() {
     assert_evm_jit_equivalence!(fibonacci);
+}
+
+#[test]
+fn test_evm_and_jit_fibonacci_repetitions() {
     assert_evm_jit_equivalence!(fibonacci_repetitions);
+}
+
+#[test]
+fn test_evm_and_jit_exp() {
+    assert_evm_jit_equivalence!(exp);
+}
+
+#[test]
+fn test_evm_and_jit_mload() {
+    assert_evm_jit_equivalence!(mload);
+}
+
+#[test]
+fn test_evm_and_jit_mstore8() {
+    assert_evm_jit_equivalence!(mstore8);
+}
+
+#[test]
+fn test_evm_and_jit_sha3() {
+    assert_evm_jit_equivalence!(sha3);
 }
