@@ -14,12 +14,14 @@ thiserror = "1.0.31"
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master" }
 itertools = "0.10.3"
 revm = { git = "https://github.com/bluealloy/revm.git", tag = "v26" }
+#revm = { path = "/home/tjsharp/revm/crates/revm" }
 
 # for testing:
 rand = "0.8.5"
 paste = "1.0.7"
 sha3 = "0.10.8"
 hex-literal = "0.4.1"
+
 
 [features]
 default = ["llvm16"]

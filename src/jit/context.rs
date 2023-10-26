@@ -4,6 +4,7 @@ use crate::jit::{
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
     ops::{build_stack_check, build_stack_push},
+	gas::build_gas_check,
 };
 use bytes::Bytes;
 use inkwell::{
@@ -584,6 +585,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -614,6 +616,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -644,6 +647,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -675,6 +679,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -706,6 +711,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -736,6 +742,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -766,6 +773,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
+	    build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();

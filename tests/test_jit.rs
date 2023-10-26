@@ -1,7 +1,6 @@
 use inkwell::context::Context;
 use jitevm::code::{EvmCode, EvmOpParserMode};
 use jitevm::jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, Success};
-use primitive_types::U256;
 use revm::{
     db::in_memory_db::BenchmarkDB,
     primitives::{
@@ -62,7 +61,7 @@ macro_rules! assert_evm_jit_equivalence {
         let code = load_evm_code(name);
 
         let jit_result = test_jit_with_code(code.clone());
-        let ResultAndState { result, state } = test_evm_with_code(code);
+        let ResultAndState { result, .. } = test_evm_with_code(code);
 
         println!("TJDEBUG evmresult {:#?}", result);
         match result {

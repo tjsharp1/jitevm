@@ -1,5 +1,5 @@
 #define macro MAIN() = {
-    0xc350                   // [ITERATIONS]  (50,000)
+    0x7530                   // [ITERATIONS]  (30,000)
 top:
     dup1 iszero              // [ITERATIONS == 0, ITERATIONS]
 	end jumpi                // [ITERATIONS]

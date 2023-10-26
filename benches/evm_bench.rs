@@ -11,6 +11,7 @@ use revm::{
     EVM,
 };
 use std::path::PathBuf;
+use std::time::Duration;
 
 fn load_evm_code(test_name: &str) -> EvmCode {
     let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
@@ -56,6 +57,7 @@ pub fn evm_benchmark(c: &mut Criterion) {
     let args6 = interp_get_env_args(code);
 
     let mut group = c.benchmark_group("REVM benchmarks");
+	group.measurement_time(Duration::from_secs(30));
     group.bench_with_input(BenchmarkId::new("REVM", "fibonacci"), &args1, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
@@ -76,7 +78,6 @@ pub fn evm_benchmark(c: &mut Criterion) {
     group.bench_with_input(BenchmarkId::new("REVM", "sha3"), &args6, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
-
     group.finish();
 }
 
@@ -120,6 +121,7 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
         .expect("Could not JIT contract");
 
     let mut group = c.benchmark_group("JIT benchmarks");
+	group.measurement_time(Duration::from_secs(30));
     group.bench_with_input(BenchmarkId::new("JIT", "fibonacci"), &contract1, |b, i| {
         b.iter(|| jitevm_bench(i))
     });

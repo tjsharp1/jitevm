@@ -1,5 +1,5 @@
 #define macro MAIN() = {
-    0xc350                   // [N] (50,000)
+    0x7530                   // [N] (30,000)
 mainloop:
 	dup1 iszero              // [N == 0, N]
 	cleanup jumpi            // [N]
