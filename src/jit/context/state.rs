@@ -130,7 +130,7 @@ unsafe fn block_hash<DB: Database>(db: *const (), block: U256) -> B256 {
 mod test {
     use super::*;
 
-    use alloy_primitives::{uint, Uint};
+    use alloy_primitives::{address, uint, Uint};
     use revm::db::InMemoryDB;
 
     const ADDRESS: Address = address!("3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD");
