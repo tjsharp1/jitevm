@@ -4,7 +4,7 @@ use reth_provider::StateProvider;
 use revm::{
     db::DatabaseRef,
     primitives::{AccountInfo, Bytecode},
-    Database, StateDBBox,
+    Database,
 };
 use revm_primitives::KECCAK_EMPTY;
 

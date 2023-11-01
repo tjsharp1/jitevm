@@ -1,4 +1,4 @@
-use alloy_primitives::{address, Address, B160, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use revm_primitives::{
     db::Database, hash_map::Entry, Account, AccountInfo, Bytecode, State, StorageSlot,
 };
@@ -87,7 +87,7 @@ unsafe fn basic<DB: Database>(db: *const (), address: Address) -> Option<Account
 
     match db.basic(address) {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             panic!("Could not fetch basic account info from DB!")
         }
     }
@@ -98,7 +98,7 @@ unsafe fn code_by_hash<DB: Database>(db: *const (), hash: B256) -> Bytecode {
 
     match db.code_by_hash(hash) {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             panic!("Could not fetch code from DB!")
         }
     }
@@ -109,7 +109,7 @@ unsafe fn storage<DB: Database>(db: *const (), address: Address, index: U256) ->
 
     match db.storage(address, index) {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             panic!("Could not fetch storage from DB!")
         }
     }
@@ -120,7 +120,7 @@ unsafe fn block_hash<DB: Database>(db: *const (), block: U256) -> B256 {
 
     match db.block_hash(block) {
         Ok(r) => r,
-        Err(e) => {
+        Err(_) => {
             panic!("Could not fetch block hash from DB!")
         }
     }

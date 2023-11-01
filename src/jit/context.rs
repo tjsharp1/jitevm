@@ -6,9 +6,8 @@ use crate::jit::{
     gas::build_gas_check,
     ops::{build_stack_check, build_stack_push},
 };
-use alloy_primitives::{Address, B160, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use bytes::Bytes;
-use core::marker::PhantomData;
 use inkwell::{
     context::Context,
     targets::TargetData,
@@ -17,7 +16,6 @@ use inkwell::{
     AddressSpace,
 };
 use revm_primitives::{db::Database, State};
-use std::collections::HashMap;
 
 mod state;
 pub use state::DBBox;
