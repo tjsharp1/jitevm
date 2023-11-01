@@ -1,16 +1,10 @@
+use super::{expect_halt, expect_stack_underflow, expect_success, operations, test_jit};
+use crate::jit::{gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success};
 use crate::spec::SpecId;
-use crate::jit::{
-    ExecutionResult,
-    EvmOp,
-	Halt,
-	JitEvmExecutionContext,
-	gas,
-	Success,
-};
+use alloy_primitives::U256;
 use paste::paste;
-use primitive_types::U256;
 use rand::Rng;
-use super::{expect_halt, expect_success, expect_stack_underflow, test_jit, operations};
+use revm::db::InMemoryDB;
 
 macro_rules! test_op1 {
     ($fname:ident, $evmop:expr, $opname:expr) => {
@@ -20,10 +14,11 @@ macro_rules! test_op1 {
                 use crate::code::EvmOp::*;
 
                 fn _test(a: U256) {
-                    let mut ctx = JitEvmExecutionContext::new();
+                    let db = InMemoryDB::default();
+                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
 
                     let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
                     let op_cost = gas.const_cost($evmop);
                     let init_cost = gas.init_gas(&[]);
                     let expected_gas = init_cost + push_cost + op_cost;
@@ -44,12 +39,12 @@ macro_rules! test_op1 {
                     assert_eq!(d, d_);
                 }
 
-                _test(U256::zero());
-                _test(U256::one());
+                _test(U256::ZERO);
+                _test(U256::from(1));
 
                 for _i in 0..1000 {
                     let a = rand::thread_rng().gen::<[u8; 32]>();
-                    let a = U256::from_big_endian(&a);
+                    let a = U256::from_be_bytes(a);
                     _test(a);
                 }
             }
@@ -66,10 +61,11 @@ macro_rules! test_op2 {
                 use crate::code::EvmOp::*;
 
                 fn _test(a: U256, b: U256) {
-                    let mut ctx = JitEvmExecutionContext::new();
+                    let db = InMemoryDB::default();
+                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
 
                     let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
                     let op_cost = gas.const_cost($evmop);
                     let init_cost = gas.init_gas(&[]);
                     let expected_gas = init_cost + push_cost * 2 + op_cost;
@@ -91,16 +87,16 @@ macro_rules! test_op2 {
                     assert_eq!(d, d_);
                 }
 
-                _test(U256::zero(), U256::zero());
-                _test(U256::zero(), U256::one());
-                _test(U256::one(), U256::zero());
-                _test(U256::one(), U256::one());
+                _test(U256::ZERO, U256::ZERO);
+                _test(U256::ZERO, U256::from(1));
+                _test(U256::from(1), U256::ZERO);
+                _test(U256::from(1), U256::from(1));
 
                 for _i in 0..1000 {
                     let a = rand::thread_rng().gen::<[u8; 32]>();
                     let b = rand::thread_rng().gen::<[u8; 32]>();
-                    let a = U256::from_big_endian(&a);
-                    let b = U256::from_big_endian(&b);
+                    let a = U256::from_be_bytes(a);
+                    let b = U256::from_be_bytes(b);
                     _test(a, b);
                 }
             }
@@ -117,10 +113,11 @@ macro_rules! test_op2_small {
                 use crate::code::EvmOp::*;
 
                 fn _test(a: U256, b: U256) {
-                    let mut ctx = JitEvmExecutionContext::new();
+                    let db = InMemoryDB::default();
+                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
 
                     let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
                     let op_cost = gas.const_cost($evmop);
                     let init_cost = gas.init_gas(&[]);
                     let expected_gas = init_cost + push_cost * 2 + op_cost;
@@ -143,10 +140,10 @@ macro_rules! test_op2_small {
                     assert_eq!(d, d_);
                 }
 
-                _test(U256::zero(), U256::zero());
-                _test(U256::zero(), U256::one());
-                _test(U256::one(), U256::zero());
-                _test(U256::one(), U256::one());
+                _test(U256::ZERO, U256::ZERO);
+                _test(U256::ZERO, U256::from(1));
+                _test(U256::from(1), U256::ZERO);
+                _test(U256::from(1), U256::from(1));
 
                 for _i in 0..1000 {
                     let t = rand::thread_rng().gen::<u8>();
@@ -154,8 +151,8 @@ macro_rules! test_op2_small {
 
                     let mut a: [u8; 32] = [0u8; 32];
                     a[31] = t;
-                    let a = U256::from_big_endian(&a);
-                    let b = U256::from_big_endian(&b);
+                    let a = U256::from_be_bytes(a);
+                    let b = U256::from_be_bytes(b);
                     _test(a, b);
                 }
             }
@@ -172,10 +169,11 @@ macro_rules! test_op3 {
                 use crate::code::EvmOp::*;
 
                 fn _test(a: U256, b: U256, c: U256) {
-                    let mut ctx = JitEvmExecutionContext::new();
+                    let db = InMemoryDB::default();
+                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
 
                     let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
                     let op_cost = gas.const_cost($evmop);
                     let init_cost = gas.init_gas(&[]);
                     let expected_gas = init_cost + push_cost * 3 + op_cost;
@@ -198,22 +196,22 @@ macro_rules! test_op3 {
                     assert_eq!(d, d_);
                 }
 
-                _test(U256::zero(), U256::zero(), U256::zero());
-                _test(U256::zero(), U256::zero(), U256::one());
-                _test(U256::zero(), U256::one(), U256::zero());
-                _test(U256::zero(), U256::one(), U256::one());
-                _test(U256::one(), U256::zero(), U256::zero());
-                _test(U256::one(), U256::zero(), U256::one());
-                _test(U256::one(), U256::one(), U256::zero());
-                _test(U256::one(), U256::one(), U256::one());
+                _test(U256::ZERO, U256::ZERO, U256::ZERO);
+                _test(U256::ZERO, U256::ZERO, U256::from(1));
+                _test(U256::ZERO, U256::from(1), U256::ZERO);
+                _test(U256::ZERO, U256::from(1), U256::from(1));
+                _test(U256::from(1), U256::ZERO, U256::ZERO);
+                _test(U256::from(1), U256::ZERO, U256::from(1));
+                _test(U256::from(1), U256::from(1), U256::ZERO);
+                _test(U256::from(1), U256::from(1), U256::from(1));
 
                 for _i in 0..1000 {
                     let a = rand::thread_rng().gen::<[u8; 32]>();
                     let b = rand::thread_rng().gen::<[u8; 32]>();
                     let c = rand::thread_rng().gen::<[u8; 32]>();
-                    let a = U256::from_big_endian(&a);
-                    let b = U256::from_big_endian(&b);
-                    let c = U256::from_big_endian(&c);
+                    let a = U256::from_be_bytes(a);
+                    let b = U256::from_be_bytes(b);
+                    let c = U256::from_be_bytes(c);
 
                     _test(a, b, c);
                 }
@@ -228,7 +226,7 @@ fn operations_underflow_exp() {
     use crate::code::EvmOp::*;
 
     let gas = gas::Gas::new(SpecId::LATEST);
-    let push_gas = gas.const_cost(Push(32, U256::zero()));
+    let push_gas = gas.const_cost(Push(32, U256::ZERO));
     let init_cost = gas.init_gas(&[]);
     let (base, exp) = gas.exp_cost();
 
@@ -240,7 +238,8 @@ fn operations_underflow_exp() {
 
         let expected_gas = init_cost + push_gas * i;
 
-        let mut ctx = JitEvmExecutionContext::new();
+        let db = InMemoryDB::default();
+        let mut ctx = JitEvmExecutionContext::new_with_db(&db);
         let result = test_jit(cloned, &mut ctx).expect("Contract build failed");
 
         expect_halt!(
@@ -250,13 +249,14 @@ fn operations_underflow_exp() {
             expected_gas
         );
 
-        ops.push(Push(32, U256::one() * (i + 1)));
+        ops.push(Push(32, U256::from(i + 1)));
     }
     ops.push(EvmOp::Exp);
 
     let expected_gas = init_cost + push_gas * 2 + base + exp;
 
-    let mut ctx = JitEvmExecutionContext::new();
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
     let result = test_jit(ops, &mut ctx).expect("Contract build failed");
 
     expect_success!(
@@ -272,10 +272,11 @@ fn operations_jit_equivalence_exp() {
     use crate::code::EvmOp::*;
 
     fn _test(a: U256, b: U256) {
-        let mut ctx = JitEvmExecutionContext::new();
+        let db = InMemoryDB::default();
+        let mut ctx = JitEvmExecutionContext::new_with_db(&db);
 
         let gas = gas::Gas::new(SpecId::LATEST);
-        let push_cost = gas.const_cost(Push(32, U256::zero()));
+        let push_cost = gas.const_cost(Push(32, U256::ZERO));
         let (base, exp) = gas.exp_cost();
         let init_cost = gas.init_gas(&[]);
 
@@ -297,16 +298,16 @@ fn operations_jit_equivalence_exp() {
         assert_eq!(d, d_);
     }
 
-    _test(U256::zero(), U256::zero());
-    _test(U256::zero(), U256::one());
-    _test(U256::one(), U256::zero());
-    _test(U256::one(), U256::one());
+    _test(U256::ZERO, U256::ZERO);
+    _test(U256::ZERO, U256::from(1));
+    _test(U256::from(1), U256::ZERO);
+    _test(U256::from(1), U256::from(1));
 
     for _i in 0..1000 {
         let a = rand::thread_rng().gen::<[u8; 32]>();
         let b = rand::thread_rng().gen::<[u8; 32]>();
-        let a = U256::from_big_endian(&a);
-        let b = U256::from_big_endian(&b);
+        let a = U256::from_be_bytes(a);
+        let b = U256::from_be_bytes(b);
         _test(a, b);
     }
 }

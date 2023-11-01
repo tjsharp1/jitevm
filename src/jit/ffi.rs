@@ -7,19 +7,14 @@ use crate::jit::{
     ops::{build_stack_check, build_stack_inc, build_stack_pop},
     types::JitTypes,
 };
-use hex_literal::hex;
+use alloy_primitives::U256;
 use inkwell::{
     execution_engine::ExecutionEngine,
     module::Module,
     values::{FunctionValue, IntValue},
     AddressSpace,
 };
-use primitive_types::U256;
 use sha3::{Digest, Keccak256};
-
-// TODO: finish with this
-pub const KECCAK_EMPTY: [u8; 32] =
-    hex!("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470");
 
 pub struct HostFunctions<'ctx> {
     cb_print_u64: FunctionValue<'ctx>,
@@ -192,6 +187,7 @@ impl<'ctx> HostFunctions<'ctx> {
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 2, 0);
+        // TODO: check if gas < 2300 (Istanbul fork)
 
         let book = current.book();
         let _retval = ctx
@@ -220,7 +216,7 @@ pub extern "C" fn callback_sha3(exectx: usize, sp: usize, ptr: usize, size: usiz
 
     let hash = Keccak256::digest(rawptrs.mem_slice(ptr, size));
 
-    *rawptrs.stack_mut(sp, 0) = U256::from(hash.as_slice());
+    *rawptrs.stack_mut(sp, 0) = U256::try_from_be_slice(hash.as_slice()).expect("No bytes");
 }
 
 pub extern "C" fn callback_print_u64(ptr: usize, hex: bool) {
@@ -246,16 +242,10 @@ pub extern "C" fn callback_sload(exectx: usize, sp: usize) -> u64 {
 
     let key: &mut U256 = rawptrs.stack_mut(sp, 1);
 
-    match rawptrs.storage_get(key) {
-        Some(value) => {
-            *key = *value;
-        }
-        None => {
-            *key = U256::zero();
-        }
-    }
+    let (val, warm) = rawptrs.sload(key);
+    *key = val;
 
-    0
+    warm as u64
 }
 
 pub extern "C" fn callback_sstore(exectx: usize, sp: usize) -> u64 {
@@ -264,7 +254,8 @@ pub extern "C" fn callback_sstore(exectx: usize, sp: usize) -> u64 {
     let key: &U256 = rawptrs.stack(sp, 1);
     let value: &U256 = rawptrs.stack(sp, 2);
 
-    rawptrs.storage_insert(*key, *value);
+    let (original, current, new, warm) = rawptrs.sstore(*key, *value);
 
+    // TODO: return gas amount
     0
 }

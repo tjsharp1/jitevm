@@ -3,10 +3,12 @@ use crate::jit::{
     contract::{BuilderContext, JitEvmEngineSimpleBlock},
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
+    gas::build_gas_check,
     ops::{build_stack_check, build_stack_push},
-	gas::build_gas_check,
 };
+use alloy_primitives::{Address, B160, B256, U256};
 use bytes::Bytes;
+use core::marker::PhantomData;
 use inkwell::{
     context::Context,
     targets::TargetData,
@@ -14,8 +16,12 @@ use inkwell::{
     values::{IntValue, PointerValue},
     AddressSpace,
 };
-use primitive_types::{H160, H256, U256};
+use revm_primitives::{db::Database, State};
 use std::collections::HashMap;
+
+mod state;
+pub use state::DBBox;
+use state::EVMState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Success {
@@ -268,7 +274,7 @@ impl From<JitContractResultCode> for u32 {
 }
 
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(in crate::jit) struct JitContractExecutionResult {
     result_code: u32,
     gas_used: u64,
@@ -277,6 +283,16 @@ pub(in crate::jit) struct JitContractExecutionResult {
     // TODO: finish the below, revert will have output as well, all remaining will have gas_used
     // logs: Vec<Log>,
     // output: Output::Call(Bytes) or Output::Create(Bytes, Option<Address>)
+}
+
+impl JitContractExecutionResult {
+    pub fn new() -> JitContractExecutionResult {
+        JitContractExecutionResult {
+            result_code: 0,
+            gas_used: 0,
+            gas_refunded: 0,
+        }
+    }
 }
 
 impl<'ctx> JitContractExecutionResult {
@@ -400,9 +416,9 @@ pub(in crate::jit) struct JitEvmPtrs {
     //           - possibly other code! => try not to change this!
     pub stack: usize,
     pub memory: usize,
-    pub storage: usize,
     pub block_context: usize,
     pub transaction_context: usize,
+    pub evm_state: usize,
 }
 
 impl<'ctx> JitEvmPtrs {
@@ -414,9 +430,9 @@ impl<'ctx> JitEvmPtrs {
         let fields = vec![
             ptr_type.into(), // stack
             ptr_type.into(), // memory
-            ptr_type.into(), // storage
             ptr_type.into(), // block_context
             ptr_type.into(), // transaction_context
+            ptr_type.into(), // evm_state
         ];
         ctx.struct_type(&fields, false)
     }
@@ -436,7 +452,7 @@ impl<'ctx> JitEvmPtrs {
         let offset = ctx.builder.build_struct_gep(
             ctx.types.execution_context,
             ptr,
-            4,
+            3,
             "get_transaction_context",
         )?;
 
@@ -467,7 +483,7 @@ impl<'ctx> JitEvmPtrs {
         let offset = ctx.builder.build_struct_gep(
             ctx.types.execution_context,
             ptr,
-            3,
+            2,
             "get_block_context",
         )?;
 
@@ -491,22 +507,31 @@ impl JitEvmPtrs {
         JitEvmPtrs {
             stack: ctx.stack.as_mut_ptr() as usize,
             memory: ctx.memory.as_mut_ptr() as usize,
-            storage: &mut ctx.storage as *mut _ as usize,
             block_context: &mut ctx.block_context as *mut _ as usize,
             transaction_context: &mut ctx.transaction_context as *mut _ as usize,
+            evm_state: &mut ctx.evm_state as *mut _ as usize,
         }
     }
 
-    pub fn storage_get(&self, key: &U256) -> Option<&U256> {
-        let storage: &mut HashMap<U256, U256> = unsafe { &mut *(self.storage as *mut _) };
+    /////////////////////////////TODO!!!///////////////////////////////////////////////
+    pub fn sload(&self, key: &U256) -> (U256, bool) {
+        let evm_state: &mut EVMState = unsafe { &mut *(self.evm_state as *mut _) };
+        let tx_context: &TransactionContext = unsafe { &*(self.transaction_context as *const _) };
+        // TODO: maybe put in EVMState as current account?
+        let address = tx_context.contract_address();
 
-        storage.get(key)
+        evm_state.sload(address, *key)
     }
 
-    pub fn storage_insert(&self, key: U256, value: U256) -> Option<U256> {
-        let storage: &mut HashMap<U256, U256> = unsafe { &mut *(self.storage as *mut _) };
-        storage.insert(key, value)
+    pub fn sstore(&self, key: U256, value: U256) -> (U256, U256, U256, bool) {
+        let evm_state: &mut EVMState = unsafe { &mut *(self.evm_state as *mut _) };
+        let tx_context: &TransactionContext = unsafe { &*(self.transaction_context as *const _) };
+        // TODO: maybe put in EVMState as current account?
+        let address = tx_context.contract_address();
+
+        evm_state.sstore(address, key, value)
     }
+    /////////////////////////////TODO!!!///////////////////////////////////////////////
 
     pub fn mem_slice(&self, ptr: usize, size: usize) -> &[u8] {
         unsafe { std::slice::from_raw_parts((self.memory + ptr) as *const u8, size) }
@@ -522,7 +547,7 @@ impl JitEvmPtrs {
 }
 
 #[repr(C)]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct BlockContext {
     number: U256,
     coinbase: U256,
@@ -534,14 +559,24 @@ pub struct BlockContext {
 }
 
 impl BlockContext {
+    pub fn new() -> BlockContext {
+        BlockContext {
+            number: U256::ZERO,
+            coinbase: U256::ZERO,
+            timestamp: U256::ZERO,
+            difficulty: U256::ZERO,
+            prevrandao: U256::ZERO,
+            basefee: U256::ZERO,
+            gas_limit: U256::ZERO,
+        }
+    }
+
     pub fn set_number(&mut self, number: U256) {
         self.number = number;
     }
 
-    pub fn set_coinbase(&mut self, coinbase: H160) {
-        let mut tmp = [0u8; 32];
-        tmp[12..].copy_from_slice(coinbase.as_bytes());
-        self.coinbase = U256::from_big_endian(&tmp);
+    pub fn set_coinbase(&mut self, coinbase: Address) {
+        self.coinbase = coinbase.into_word().into();
     }
 
     pub fn set_timestamp(&mut self, timestamp: U256) {
@@ -552,8 +587,8 @@ impl BlockContext {
         self.difficulty = difficulty;
     }
 
-    pub fn set_prevrandao(&mut self, prevrandao: H256) {
-        self.prevrandao = U256::from_big_endian(prevrandao.as_bytes());
+    pub fn set_prevrandao(&mut self, prevrandao: B256) {
+        self.prevrandao = prevrandao.into();
     }
 
     pub fn set_basefee(&mut self, basefee: U256) {
@@ -585,7 +620,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -616,7 +651,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -647,7 +682,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -679,7 +714,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -711,7 +746,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -742,7 +777,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -773,7 +808,7 @@ impl<'ctx> BlockContext {
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-	    build_gas_check!(ctx, current);
+        build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
@@ -804,6 +839,7 @@ impl<'ctx> BlockContext {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct TransactionContext {
+    address: U256,
     caller: U256,
     gas_price: U256,
     priority_fee: U256,
@@ -818,13 +854,13 @@ pub struct TransactionContext {
 
 impl Default for TransactionContext {
     fn default() -> TransactionContext {
-        // TODO: good defaults?
         TransactionContext {
-            caller: U256::zero(),
-            gas_price: U256::zero(),
-            priority_fee: U256::zero(),
-            transact_to: U256::zero(),
-            value: U256::zero(),
+            address: U256::ZERO,
+            caller: U256::ZERO,
+            gas_price: U256::ZERO,
+            priority_fee: U256::ZERO,
+            transact_to: U256::ZERO,
+            value: U256::ZERO,
             chain_id: 1,
             nonce: 0,
             gas_limit: u64::MAX,
@@ -835,6 +871,14 @@ impl Default for TransactionContext {
 }
 
 impl TransactionContext {
+    pub fn contract_address(&self) -> Address {
+        Address::from_word(self.address.into())
+    }
+
+    pub fn set_contract_address(&mut self, address: Address) {
+        self.address = address.into_word().into();
+    }
+
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         self.gas_limit = gas_limit;
     }
@@ -849,6 +893,7 @@ impl<'ctx> TransactionContext {
             .ptr_type(AddressSpace::default());
 
         let fields = vec![
+            u256_type.into(), // address
             u256_type.into(), // caller
             u256_type.into(), // gas_price
             u256_type.into(), // priority_fee
@@ -880,7 +925,7 @@ impl<'ctx> TransactionContext {
         let ptr = ctx.builder.build_struct_gep(
             ctx.types.transaction_context,
             ptr,
-            7,
+            8,
             "get_tx_gas_limit",
         )?;
 
@@ -891,23 +936,30 @@ impl<'ctx> TransactionContext {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JitEvmExecutionContext {
     pub stack: Vec<U256>,
     pub memory: Vec<u8>,
-    pub storage: HashMap<U256, U256>,
     pub block_context: BlockContext,
     pub transaction_context: TransactionContext,
+    pub evm_state: EVMState,
 }
 
 impl JitEvmExecutionContext {
-    pub fn new() -> Self {
+    pub fn new_with_db<DB: Database>(db: &DB) -> Self {
+        let evm_state = EVMState::with_db(db);
+
         Self {
-            stack: vec![U256::zero(); EVM_STACK_SIZE],
+            stack: vec![U256::ZERO; EVM_STACK_SIZE],
             memory: vec![0u8; EVM_MEMORY_BYTES],
-            storage: HashMap::<U256, U256>::new(),
-            block_context: Default::default(),
+            block_context: BlockContext::new(),
             transaction_context: Default::default(),
+            evm_state,
         }
+    }
+
+    pub fn final_state(self) -> State {
+        let JitEvmExecutionContext { evm_state, .. } = self;
+        evm_state.state
     }
 }

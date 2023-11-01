@@ -3,8 +3,8 @@ use crate::jit::{
     context::JitContractResultCode, contract::BuilderContext, cursor::CurrentInstruction,
     gas::build_gas_check, JitContractExecutionResult, JitEvmEngineError,
 };
+use alloy_primitives::U256;
 use inkwell::AddressSpace;
-use primitive_types::U256;
 
 pub(crate) fn build_stop_op<'a, 'ctx>(
     ctx: &BuilderContext<'ctx>,
@@ -81,7 +81,7 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
-            let jmp_target = jmp_target.as_u64(); // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
+            let jmp_target: u64 = jmp_target.into_limbs()[0]; // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
             ctx.builder.position_at_end(jump_table[j].block);
             let cmp = ctx.builder.build_int_compare(
                 IntPredicate::EQ,
@@ -169,7 +169,7 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
-            let jmp_target = jmp_target.as_u64(); // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
+            let jmp_target: u64 = jmp_target.into_limbs()[0]; // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
             ctx.builder.position_at_end(jump_table[j].block);
             let cmp = ctx.builder.build_int_compare(
                 IntPredicate::EQ,

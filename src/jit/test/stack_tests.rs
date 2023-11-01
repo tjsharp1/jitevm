@@ -1,17 +1,12 @@
-use crate::spec::SpecId;
+use super::{expect_halt, expect_stack_overflow, expect_stack_underflow, expect_success, test_jit};
 use crate::jit::{
-    ExecutionResult,
-    EvmOp,
-	EVM_STACK_SIZE,
-	Halt,
-	JitEvmExecutionContext,
-	gas,
-	Success,
+    gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success, EVM_STACK_SIZE,
 };
+use crate::spec::SpecId;
+use alloy_primitives::U256;
 use paste::paste;
-use primitive_types::U256;
 use rand::Rng;
-use super::{expect_halt, expect_success, expect_stack_underflow, expect_stack_overflow, test_jit};
+use revm::db::InMemoryDB;
 
 macro_rules! test_op_dup {
     ($fname:ident, $evmop:expr, $position:literal) => {
@@ -24,7 +19,7 @@ macro_rules! test_op_dup {
                     let original_stack = values.clone();
 
                     let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
                     let op_cost = gas.const_cost($evmop);
                     let init_cost = gas.init_gas(&[]);
                     let expected_gas = init_cost + push_cost * values.len() as u64 + op_cost;
@@ -34,7 +29,8 @@ macro_rules! test_op_dup {
                         .map(|v| Push(32, v))
                         .collect::<Vec<_>>();
                     ops.push($evmop);
-                    let mut ctx = JitEvmExecutionContext::new();
+                    let db = InMemoryDB::default();
+                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
 
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
 
@@ -52,7 +48,7 @@ macro_rules! test_op_dup {
                 for _i in 0..1000 {
                     let data = (0..20).map(|_| {
                         let a = rand::thread_rng().gen::<[u8; 32]>();
-                        U256::from_big_endian(&a)
+                        U256::from_be_bytes(a)
                     }).collect();
 
                     _test(data);
@@ -76,7 +72,7 @@ macro_rules! test_op_swap {
                     let original_stack = values.clone();
 
                     let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::zero()));
+                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
                     let op_cost = gas.const_cost($evmop);
                     let init_cost = gas.init_gas(&[]);
                     let expected_gas = init_cost + push_cost * values.len() as u64 + op_cost;
@@ -87,7 +83,8 @@ macro_rules! test_op_swap {
                         .collect::<Vec<_>>();
                     ops.push($evmop);
 
-                    let mut ctx = JitEvmExecutionContext::new();
+                    let db = InMemoryDB::default();
+                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
                     let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
                     expect_success!($fname, result, Success::Stop, expected_gas);
 
@@ -109,7 +106,7 @@ macro_rules! test_op_swap {
                 for _i in 0..1000 {
                     let data = (0..20).map(|_| {
                         let a = rand::thread_rng().gen::<[u8; 32]>();
-                        U256::from_big_endian(&a)
+                        U256::from_be_bytes(a)
                     }).collect();
 
                     _test(data);

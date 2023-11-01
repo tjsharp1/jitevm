@@ -1,4 +1,4 @@
-use primitive_types::U256;
+use alloy_primitives::U256;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -356,8 +356,7 @@ impl EvmOp {
                 if *len == 0 {
                     vec![0x5f]
                 } else {
-                    let mut v = [0u8; 32];
-                    val.to_big_endian(&mut v);
+                    let v: [u8; 32] = val.to_be_bytes();
                     let mut w = vec![0x60 + (len - 1) as u8];
                     w.append(&mut v[32 - len..32].to_vec());
                     w
@@ -441,7 +440,8 @@ impl EvmOp {
             if 1 + len > b.len() {
                 return Err(EvmOpError::ParserErrorIncompleteInstruction);
             } else {
-                let val = U256::from_big_endian(&b[1..1 + len]);
+                let val =
+                    U256::try_from_be_slice(&b[1..1 + len]).expect("Could not parse integer!");
                 return Ok((Push(len, val), 1 + len));
             }
         } else {
@@ -510,7 +510,7 @@ impl EvmOp {
                 0x59 => Ok((Msize, 1)),
                 0x5a => Ok((Gas, 1)),
                 0x5b => Ok((Jumpdest, 1)),
-                0x5f => Ok((Push(0, U256::zero()), 1)),
+                0x5f => Ok((Push(0, U256::ZERO), 1)),
 
                 0x80 => Ok((Dup1, 1)),
                 0x81 => Ok((Dup2, 1)),
@@ -668,8 +668,8 @@ impl IndexedEvmCode {
 
         let mut target = 0;
         for opidx in 0..code.ops.len() {
-            opidx2target.insert(opidx, U256::zero() + target);
-            target2opidx.insert(U256::zero() + target, opidx);
+            opidx2target.insert(opidx, U256::from(target));
+            target2opidx.insert(U256::from(target), opidx);
             target += code.ops[opidx].len();
 
             if code.ops[opidx] == EvmOp::Jumpdest {

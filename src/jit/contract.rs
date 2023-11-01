@@ -12,7 +12,7 @@ use crate::{
     },
     spec::SpecId,
 };
-
+use core::marker::PhantomData;
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -22,6 +22,7 @@ use inkwell::targets::{InitializationConfig, Target};
 use inkwell::values::{IntValue, PhiValue};
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
+use revm_primitives::db::Database;
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize, u64) -> ();
 
@@ -193,7 +194,7 @@ pub struct JitEvmContract<'ctx> {
 }
 
 impl<'ctx> JitEvmContract<'ctx> {
-    pub fn call(
+    pub fn transact(
         &self,
         context: &mut jit::JitEvmExecutionContext,
     ) -> Result<ExecutionResult, JitEvmEngineError> {
@@ -203,7 +204,7 @@ impl<'ctx> JitEvmContract<'ctx> {
 
         unsafe {
             let mut ptrs = JitEvmPtrs::from_context(context);
-            let mut result = JitContractExecutionResult::default();
+            let mut result = JitContractExecutionResult::new();
 
             self.function.call(
                 &mut ptrs as *mut _ as usize,

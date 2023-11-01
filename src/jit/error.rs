@@ -17,6 +17,8 @@ pub enum JitEvmEngineError {
     UnknownStringError(String),
     #[error("Jump at opcode index {0} has no valid jump destinations!")]
     NoValidJumpDestinations(usize),
+    #[error("Reth database error {0}!")]
+    RethDBError(#[from] reth_interfaces::RethError),
 }
 
 impl From<String> for JitEvmEngineError {

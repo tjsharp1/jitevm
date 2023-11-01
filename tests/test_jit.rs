@@ -19,10 +19,14 @@ fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
         .build(code.augment().index())
         .expect("Could not JIT contract");
 
-    let mut holder = JitEvmExecutionContext::new();
+    let bytes = Bytes::copy_from_slice(&code.to_bytes());
+    let bytecode = Bytecode::new_raw(bytes).to_checked();
+    let database = BenchmarkDB::new_bytecode(bytecode);
+
+    let mut holder = JitEvmExecutionContext::new_with_db(&database);
     holder.transaction_context.set_gas_limit(u64::MAX);
     let result = contract
-        .call(&mut holder)
+        .transact(&mut holder)
         .expect("JIT contract call failed");
     result
 }

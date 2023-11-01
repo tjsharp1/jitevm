@@ -1,8 +1,8 @@
 use crate::jit::{
     contract::BuilderContext, cursor::CurrentInstruction, gas::build_gas_check, JitEvmEngineError,
 };
+use alloy_primitives::U256;
 use inkwell::AddressSpace;
-use primitive_types::U256;
 
 pub(crate) fn build_push_op<'a, 'ctx>(
     ctx: &BuilderContext<'ctx>,
@@ -13,7 +13,10 @@ pub(crate) fn build_push_op<'a, 'ctx>(
     build_stack_check!(ctx, current, 0, 1);
 
     let book = current.book();
-    let val = ctx.types.type_stackel.const_int_arbitrary_precision(&val.0);
+    let val = ctx
+        .types
+        .type_stackel
+        .const_int_arbitrary_precision(&val.into_limbs());
     let book = build_stack_push!(ctx, book, val);
 
     ctx.builder
