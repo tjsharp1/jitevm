@@ -2,12 +2,13 @@ use crate::jit::ops::{build_stack_check, build_stack_pop, build_stack_push};
 use crate::jit::{
     contract::{BuilderContext, JitEvmEngineSimpleBlock},
     cursor::CurrentInstruction,
-    gas::{build_gas_check, build_gas_check_exp},
+    gas::{build_gas_check, build_gas_check_exp, const_cost, exp_cost},
     EvmOp, JitEvmEngineError,
 };
 use inkwell::{AddressSpace, IntPredicate};
+use revm_primitives::Spec;
 
-pub(crate) fn iszero_op<'a, 'ctx>(
+pub(crate) fn iszero_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -68,7 +69,7 @@ pub(crate) fn iszero_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_byte_op<'a, 'ctx>(
+pub(crate) fn build_byte_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -105,7 +106,7 @@ pub(crate) fn build_byte_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_arithmetic_op<'a, 'ctx>(
+pub(crate) fn build_arithmetic_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -153,7 +154,7 @@ pub(crate) fn build_arithmetic_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_cmp_op<'a, 'ctx>(
+pub(crate) fn build_cmp_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     predicate: IntPredicate,
@@ -211,7 +212,7 @@ pub(crate) fn build_cmp_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_signextend_op<'a, 'ctx>(
+pub(crate) fn build_signextend_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -271,7 +272,7 @@ pub(crate) fn build_signextend_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_mod_op<'a, 'ctx>(
+pub(crate) fn build_mod_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -341,7 +342,7 @@ macro_rules! op2_i256_exp_bit {
     }};
 }
 
-pub(crate) fn build_exp_op<'a, 'ctx>(
+pub(crate) fn build_exp_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -478,7 +479,7 @@ pub(crate) fn build_exp_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_not_op<'a, 'ctx>(
+pub(crate) fn build_not_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {

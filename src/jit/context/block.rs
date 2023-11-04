@@ -2,64 +2,72 @@ use crate::jit::{
     context::JitEvmPtrs,
     contract::BuilderContext,
     cursor::CurrentInstruction,
-    gas::build_gas_check,
+    gas::{build_gas_check, const_cost},
     ops::{build_stack_check, build_stack_push},
     JitEvmEngineError,
 };
 use alloy_primitives::{Address, B256, U256};
 use inkwell::{context::Context, targets::TargetData, types::StructType, AddressSpace};
+use revm_primitives::Spec;
+
+#[derive(Clone, Debug)]
+pub struct BlockConfig {
+    pub number: U256,
+    pub coinbase: Address,
+    pub timestamp: U256,
+    pub difficulty: U256,
+    pub prevrandao: B256,
+    pub basefee: U256,
+    pub gas_limit: U256,
+}
+
+impl Default for BlockConfig {
+    fn default() -> BlockConfig {
+        BlockConfig {
+            number: U256::ZERO,
+            coinbase: Address::ZERO,
+            timestamp: U256::from(1),
+            gas_limit: U256::MAX,
+            basefee: U256::ZERO,
+            difficulty: U256::ZERO,
+            prevrandao: B256::ZERO,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct BlockContext {
-    number: U256,
-    coinbase: U256,
-    timestamp: U256,
-    difficulty: U256,
-    prevrandao: U256,
-    basefee: U256,
-    gas_limit: U256,
+    pub number: U256,
+    pub coinbase: U256,
+    pub timestamp: U256,
+    pub difficulty: U256,
+    pub prevrandao: U256,
+    pub basefee: U256,
+    pub gas_limit: U256,
 }
 
 impl BlockContext {
-    pub fn new() -> BlockContext {
+    pub fn from_config(cfg: BlockConfig) -> BlockContext {
+        let BlockConfig {
+            number,
+            coinbase,
+            timestamp,
+            gas_limit,
+            basefee,
+            difficulty,
+            prevrandao,
+        } = cfg;
+
         BlockContext {
-            number: U256::ZERO,
-            coinbase: U256::ZERO,
-            timestamp: U256::ZERO,
-            difficulty: U256::ZERO,
-            prevrandao: U256::ZERO,
-            basefee: U256::ZERO,
-            gas_limit: U256::ZERO,
+            number,
+            coinbase: coinbase.into_word().into(),
+            timestamp,
+            difficulty,
+            prevrandao: prevrandao.into(),
+            basefee,
+            gas_limit,
         }
-    }
-
-    pub fn set_number(&mut self, number: U256) {
-        self.number = number;
-    }
-
-    pub fn set_coinbase(&mut self, coinbase: Address) {
-        self.coinbase = coinbase.into_word().into();
-    }
-
-    pub fn set_timestamp(&mut self, timestamp: U256) {
-        self.timestamp = timestamp;
-    }
-
-    pub fn set_difficulty(&mut self, difficulty: U256) {
-        self.difficulty = difficulty;
-    }
-
-    pub fn set_prevrandao(&mut self, prevrandao: B256) {
-        self.prevrandao = prevrandao.into();
-    }
-
-    pub fn set_basefee(&mut self, basefee: U256) {
-        self.basefee = basefee;
-    }
-
-    pub fn set_gas_limit(&mut self, gas_limit: U256) {
-        self.gas_limit = gas_limit;
     }
 }
 
@@ -79,7 +87,7 @@ impl<'ctx> BlockContext {
         ctx.struct_type(&fields, false)
     }
 
-    pub(crate) fn build_get_number<'a>(
+    pub(crate) fn build_get_number<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
@@ -110,7 +118,7 @@ impl<'ctx> BlockContext {
         Ok(())
     }
 
-    pub(crate) fn build_get_coinbase<'a>(
+    pub(crate) fn build_get_coinbase<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
@@ -141,7 +149,7 @@ impl<'ctx> BlockContext {
         Ok(())
     }
 
-    pub(crate) fn build_get_timestamp<'a>(
+    pub(crate) fn build_get_timestamp<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
@@ -173,7 +181,7 @@ impl<'ctx> BlockContext {
         Ok(())
     }
 
-    pub(crate) fn build_get_difficulty<'a>(
+    pub(crate) fn build_get_difficulty<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
@@ -205,7 +213,7 @@ impl<'ctx> BlockContext {
         Ok(())
     }
 
-    pub(crate) fn build_get_randao<'a>(
+    pub(crate) fn build_get_randao<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
@@ -236,7 +244,7 @@ impl<'ctx> BlockContext {
         Ok(())
     }
 
-    pub(crate) fn build_get_basefee<'a>(
+    pub(crate) fn build_get_basefee<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
@@ -267,7 +275,7 @@ impl<'ctx> BlockContext {
         Ok(())
     }
 
-    pub(crate) fn build_get_gas_limit<'a>(
+    pub(crate) fn build_get_gas_limit<'a, SPEC: Spec>(
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {

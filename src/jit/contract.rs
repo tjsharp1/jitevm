@@ -5,12 +5,11 @@ use crate::{
         context::{BlockContext, JitContractExecutionResult, JitEvmPtrs},
         cursor::{self, LendingIterator},
         error::JitEvmEngineError,
-        gas::Gas,
+        gas::init_gas,
         ops,
         types::JitTypes,
         ExecutionResult,
     },
-    spec::SpecId,
 };
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
@@ -21,6 +20,7 @@ use inkwell::targets::{InitializationConfig, Target};
 use inkwell::values::{IntValue, PhiValue};
 use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
+use revm_primitives::Spec;
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize, u64) -> ();
 
@@ -182,23 +182,23 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
 }
 
 #[derive(Debug, Clone)]
-pub struct JitEvmContract<'ctx> {
+pub struct JitEvmContract<'ctx, SPEC: Spec> {
     //context: &'ctx Context,
     // NOTE: will likely need the module, if linking contract calls via llvm
     //module: Module<'ctx>,
     //execution_engine: ExecutionEngine<'ctx>,
-    gas: Gas,
+    spec: SPEC,
     function: JitFunction<'ctx, JitEvmCompiledContract>,
 }
 
-impl<'ctx> JitEvmContract<'ctx> {
+impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
     pub fn transact(
         &self,
-        context: &mut jit::JitEvmExecutionContext,
+        context: &mut jit::JitEvmExecutionContext<SPEC>,
     ) -> Result<ExecutionResult, JitEvmEngineError> {
         // TODO: txdata from context. Calldata instruction
         //       check gas_limits here, or from caller
-        let init_gas = self.gas.init_gas(&[]);
+        let init_gas = init_gas::<SPEC>(&[]);
 
         unsafe {
             let mut ptrs = JitEvmPtrs::from_context(context);
@@ -217,7 +217,6 @@ impl<'ctx> JitEvmContract<'ctx> {
 
 pub struct BuilderContext<'ctx> {
     pub context: &'ctx Context,
-    pub gas: Gas,
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     pub types: JitTypes<'ctx>,
@@ -241,11 +240,9 @@ impl<'ctx> JitContractBuilder<'ctx> {
 
         let types = JitTypes::new(&context, &execution_engine);
         let host_functions = jit::HostFunctions::new(types.clone(), &module, &execution_engine);
-        let gas = Gas::new(SpecId::LATEST);
 
         let ctx = BuilderContext {
             context,
-            gas,
             module,
             builder,
             types,
@@ -260,11 +257,6 @@ impl<'ctx> JitContractBuilder<'ctx> {
         })
     }
 
-    pub fn with_spec_id(mut self, spec_id: SpecId) -> Self {
-        self.ctx.gas.set_spec_id(spec_id);
-        self
-    }
-
     pub fn debug_ir(mut self, filename: &str) -> Self {
         self.debug_ir = Some(filename.into());
         self
@@ -275,7 +267,11 @@ impl<'ctx> JitContractBuilder<'ctx> {
         self
     }
 
-    pub fn build(self, code: IndexedEvmCode) -> Result<JitEvmContract<'ctx>, JitEvmEngineError> {
+    pub fn build<SPEC: Spec>(
+        self,
+        spec: SPEC,
+        code: IndexedEvmCode,
+    ) -> Result<JitEvmContract<'ctx, SPEC>, JitEvmEngineError> {
         let JitContractBuilder {
             ctx,
             execution_engine,
@@ -295,83 +291,87 @@ impl<'ctx> JitContractBuilder<'ctx> {
             ctx.builder.position_at_end(current.block().block);
 
             match current.op() {
-                Stop => ops::build_stop_op(&ctx, current)?,
-                Push(_, val) => ops::build_push_op(&ctx, current, val)?,
-                Pop => ops::build_pop_op(&ctx, current)?,
-                Jumpdest => ops::build_jumpdest_op(&ctx, current)?,
-                Mstore => ops::build_mstore_op(&ctx, current)?,
-                Mstore8 => ops::build_mstore8_op(&ctx, current)?,
-                Mload => ops::build_mload_op(&ctx, current)?,
-                Sload => host_functions.build_sload(&ctx, current)?,
-                Sstore => host_functions.build_sstore(&ctx, current)?,
-                Sha3 => host_functions.build_sha3(&ctx, current)?,
-                Jump => ops::build_jump_op(&ctx, current)?,
-                Jumpi => ops::build_jumpi_op(&ctx, current)?,
-                Swap1 => ops::build_stack_swap_op(&ctx, current, 1)?,
-                Swap2 => ops::build_stack_swap_op(&ctx, current, 2)?,
-                Swap3 => ops::build_stack_swap_op(&ctx, current, 3)?,
-                Swap4 => ops::build_stack_swap_op(&ctx, current, 4)?,
-                Swap5 => ops::build_stack_swap_op(&ctx, current, 5)?,
-                Swap6 => ops::build_stack_swap_op(&ctx, current, 6)?,
-                Swap7 => ops::build_stack_swap_op(&ctx, current, 7)?,
-                Swap8 => ops::build_stack_swap_op(&ctx, current, 8)?,
-                Swap9 => ops::build_stack_swap_op(&ctx, current, 9)?,
-                Swap10 => ops::build_stack_swap_op(&ctx, current, 10)?,
-                Swap11 => ops::build_stack_swap_op(&ctx, current, 11)?,
-                Swap12 => ops::build_stack_swap_op(&ctx, current, 12)?,
-                Swap13 => ops::build_stack_swap_op(&ctx, current, 13)?,
-                Swap14 => ops::build_stack_swap_op(&ctx, current, 14)?,
-                Swap15 => ops::build_stack_swap_op(&ctx, current, 15)?,
-                Swap16 => ops::build_stack_swap_op(&ctx, current, 16)?,
-                Dup1 => ops::build_dup_op(&ctx, current, 1)?,
-                Dup2 => ops::build_dup_op(&ctx, current, 2)?,
-                Dup3 => ops::build_dup_op(&ctx, current, 3)?,
-                Dup4 => ops::build_dup_op(&ctx, current, 4)?,
-                Dup5 => ops::build_dup_op(&ctx, current, 5)?,
-                Dup6 => ops::build_dup_op(&ctx, current, 6)?,
-                Dup7 => ops::build_dup_op(&ctx, current, 7)?,
-                Dup8 => ops::build_dup_op(&ctx, current, 8)?,
-                Dup9 => ops::build_dup_op(&ctx, current, 9)?,
-                Dup10 => ops::build_dup_op(&ctx, current, 10)?,
-                Dup11 => ops::build_dup_op(&ctx, current, 11)?,
-                Dup12 => ops::build_dup_op(&ctx, current, 12)?,
-                Dup13 => ops::build_dup_op(&ctx, current, 13)?,
-                Dup14 => ops::build_dup_op(&ctx, current, 14)?,
-                Dup15 => ops::build_dup_op(&ctx, current, 15)?,
-                Dup16 => ops::build_dup_op(&ctx, current, 16)?,
-                Iszero => ops::iszero_op(&ctx, current)?,
-                Add => ops::build_arithmetic_op(&ctx, current)?,
-                Sub => ops::build_arithmetic_op(&ctx, current)?,
-                Mul => ops::build_arithmetic_op(&ctx, current)?,
-                Div => ops::build_arithmetic_op(&ctx, current)?,
-                Sdiv => ops::build_arithmetic_op(&ctx, current)?,
-                Mod => ops::build_arithmetic_op(&ctx, current)?,
-                Smod => ops::build_arithmetic_op(&ctx, current)?,
-                Shl => ops::build_arithmetic_op(&ctx, current)?,
-                Shr => ops::build_arithmetic_op(&ctx, current)?,
-                Sar => ops::build_arithmetic_op(&ctx, current)?,
-                And => ops::build_arithmetic_op(&ctx, current)?,
-                Or => ops::build_arithmetic_op(&ctx, current)?,
-                Xor => ops::build_arithmetic_op(&ctx, current)?,
-                Exp => ops::build_exp_op(&ctx, current)?,
-                Eq => ops::build_cmp_op(&ctx, current, IntPredicate::EQ)?,
-                Lt => ops::build_cmp_op(&ctx, current, IntPredicate::ULT)?,
-                Gt => ops::build_cmp_op(&ctx, current, IntPredicate::UGT)?,
-                Slt => ops::build_cmp_op(&ctx, current, IntPredicate::SLT)?,
-                Sgt => ops::build_cmp_op(&ctx, current, IntPredicate::SGT)?,
-                Not => ops::build_not_op(&ctx, current)?,
-                Byte => ops::build_byte_op(&ctx, current)?,
-                Addmod => ops::build_mod_op(&ctx, current)?,
-                Mulmod => ops::build_mod_op(&ctx, current)?,
-                Signextend => ops::build_signextend_op(&ctx, current)?,
-                GasLimit => BlockContext::build_get_gas_limit(&ctx, current)?,
-                BaseFee => BlockContext::build_get_basefee(&ctx, current)?,
-                PrevRandao => BlockContext::build_get_randao(&ctx, current)?,
-                Timestamp => BlockContext::build_get_timestamp(&ctx, current)?,
-                Coinbase => BlockContext::build_get_coinbase(&ctx, current)?,
-                Number => BlockContext::build_get_number(&ctx, current)?,
-                AugmentedPushJump(_, val) => ops::build_augmented_jump_op(&ctx, current, val)?,
-                AugmentedPushJumpi(_, val) => ops::build_augmented_jumpi_op(&ctx, current, val)?,
+                Stop => ops::build_stop_op::<SPEC>(&ctx, current)?,
+                Push(_, val) => ops::build_push_op::<SPEC>(&ctx, current, val)?,
+                Pop => ops::build_pop_op::<SPEC>(&ctx, current)?,
+                Jumpdest => ops::build_jumpdest_op::<SPEC>(&ctx, current)?,
+                Mstore => ops::build_mstore_op::<SPEC>(&ctx, current)?,
+                Mstore8 => ops::build_mstore8_op::<SPEC>(&ctx, current)?,
+                Mload => ops::build_mload_op::<SPEC>(&ctx, current)?,
+                Sload => host_functions.build_sload::<SPEC>(&ctx, current)?,
+                Sstore => host_functions.build_sstore::<SPEC>(&ctx, current)?,
+                Sha3 => host_functions.build_sha3::<SPEC>(&ctx, current)?,
+                Jump => ops::build_jump_op::<SPEC>(&ctx, current)?,
+                Jumpi => ops::build_jumpi_op::<SPEC>(&ctx, current)?,
+                Swap1 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 1)?,
+                Swap2 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 2)?,
+                Swap3 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 3)?,
+                Swap4 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 4)?,
+                Swap5 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 5)?,
+                Swap6 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 6)?,
+                Swap7 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 7)?,
+                Swap8 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 8)?,
+                Swap9 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 9)?,
+                Swap10 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 10)?,
+                Swap11 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 11)?,
+                Swap12 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 12)?,
+                Swap13 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 13)?,
+                Swap14 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 14)?,
+                Swap15 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 15)?,
+                Swap16 => ops::build_stack_swap_op::<SPEC>(&ctx, current, 16)?,
+                Dup1 => ops::build_dup_op::<SPEC>(&ctx, current, 1)?,
+                Dup2 => ops::build_dup_op::<SPEC>(&ctx, current, 2)?,
+                Dup3 => ops::build_dup_op::<SPEC>(&ctx, current, 3)?,
+                Dup4 => ops::build_dup_op::<SPEC>(&ctx, current, 4)?,
+                Dup5 => ops::build_dup_op::<SPEC>(&ctx, current, 5)?,
+                Dup6 => ops::build_dup_op::<SPEC>(&ctx, current, 6)?,
+                Dup7 => ops::build_dup_op::<SPEC>(&ctx, current, 7)?,
+                Dup8 => ops::build_dup_op::<SPEC>(&ctx, current, 8)?,
+                Dup9 => ops::build_dup_op::<SPEC>(&ctx, current, 9)?,
+                Dup10 => ops::build_dup_op::<SPEC>(&ctx, current, 10)?,
+                Dup11 => ops::build_dup_op::<SPEC>(&ctx, current, 11)?,
+                Dup12 => ops::build_dup_op::<SPEC>(&ctx, current, 12)?,
+                Dup13 => ops::build_dup_op::<SPEC>(&ctx, current, 13)?,
+                Dup14 => ops::build_dup_op::<SPEC>(&ctx, current, 14)?,
+                Dup15 => ops::build_dup_op::<SPEC>(&ctx, current, 15)?,
+                Dup16 => ops::build_dup_op::<SPEC>(&ctx, current, 16)?,
+                Iszero => ops::iszero_op::<SPEC>(&ctx, current)?,
+                Add => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Sub => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Mul => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Div => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Sdiv => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Mod => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Smod => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Shl => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Shr => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Sar => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                And => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Or => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Xor => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
+                Exp => ops::build_exp_op::<SPEC>(&ctx, current)?,
+                Eq => ops::build_cmp_op::<SPEC>(&ctx, current, IntPredicate::EQ)?,
+                Lt => ops::build_cmp_op::<SPEC>(&ctx, current, IntPredicate::ULT)?,
+                Gt => ops::build_cmp_op::<SPEC>(&ctx, current, IntPredicate::UGT)?,
+                Slt => ops::build_cmp_op::<SPEC>(&ctx, current, IntPredicate::SLT)?,
+                Sgt => ops::build_cmp_op::<SPEC>(&ctx, current, IntPredicate::SGT)?,
+                Not => ops::build_not_op::<SPEC>(&ctx, current)?,
+                Byte => ops::build_byte_op::<SPEC>(&ctx, current)?,
+                Addmod => ops::build_mod_op::<SPEC>(&ctx, current)?,
+                Mulmod => ops::build_mod_op::<SPEC>(&ctx, current)?,
+                Signextend => ops::build_signextend_op::<SPEC>(&ctx, current)?,
+                GasLimit => BlockContext::build_get_gas_limit::<SPEC>(&ctx, current)?,
+                BaseFee => BlockContext::build_get_basefee::<SPEC>(&ctx, current)?,
+                PrevRandao => BlockContext::build_get_randao::<SPEC>(&ctx, current)?,
+                Timestamp => BlockContext::build_get_timestamp::<SPEC>(&ctx, current)?,
+                Coinbase => BlockContext::build_get_coinbase::<SPEC>(&ctx, current)?,
+                Number => BlockContext::build_get_number::<SPEC>(&ctx, current)?,
+                AugmentedPushJump(_, val) => {
+                    ops::build_augmented_jump_op::<SPEC>(&ctx, current, val)?
+                }
+                AugmentedPushJumpi(_, val) => {
+                    ops::build_augmented_jumpi_op::<SPEC>(&ctx, current, val)?
+                }
                 _ => {
                     panic!("Op not implemented: {:?}", current.op());
                 }
@@ -410,11 +410,9 @@ impl<'ctx> JitContractBuilder<'ctx> {
             machine.write_to_file(&ctx.module, FileType::Assembly, path.as_ref())?;
         }
 
-        let BuilderContext { gas, .. } = ctx;
-
         // COMPILE
         let function: JitFunction<JitEvmCompiledContract> =
             unsafe { execution_engine.get_function("executecontract")? };
-        Ok(JitEvmContract { gas, function })
+        Ok(JitEvmContract { function, spec })
     }
 }

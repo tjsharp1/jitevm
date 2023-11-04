@@ -3,7 +3,7 @@ use crate::jit::{
     contract::BuilderContext,
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
-    gas::{build_sha3_gas_check, memory_expansion_cost},
+    gas::{build_sha3_gas_check, memory_expansion_cost, memory_gas, sha3_gas},
     ops::{build_stack_check, build_stack_inc, build_stack_pop},
     types::JitTypes,
 };
@@ -14,6 +14,7 @@ use inkwell::{
     values::{FunctionValue, IntValue},
     AddressSpace,
 };
+use revm_primitives::Spec;
 use sha3::{Digest, Keccak256};
 
 pub struct HostFunctions<'ctx> {
@@ -84,7 +85,7 @@ impl<'ctx> HostFunctions<'ctx> {
         }
     }
 
-    pub fn build_print_u64(
+    pub fn build_print_u64<SPEC: Spec>(
         &self,
         c: &BuilderContext<'ctx>,
         val: IntValue<'ctx>,
@@ -100,7 +101,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub fn build_print_u256(
+    pub fn build_print_u256<SPEC: Spec>(
         &self,
         c: &BuilderContext<'ctx>,
         val: IntValue<'ctx>,
@@ -116,7 +117,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn build_sha3<'a>(
+    pub(crate) fn build_sha3<'a, SPEC: Spec>(
         &self,
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
@@ -155,7 +156,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn build_sload<'a>(
+    pub(crate) fn build_sload<'a, SPEC: Spec>(
         &self,
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
@@ -181,7 +182,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn build_sstore<'a>(
+    pub(crate) fn build_sstore<'a, SPEC: Spec>(
         &self,
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,

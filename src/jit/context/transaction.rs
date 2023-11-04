@@ -1,56 +1,83 @@
-use crate::jit::{
-    context::JitEvmPtrs, contract::BuilderContext, cursor::CurrentInstruction, JitEvmEngineError,
-};
+use crate::jit::{context::JitEvmPtrs, contract::BuilderContext, JitEvmEngineError};
 use alloy_primitives::{Address, U256};
 use inkwell::{
     context::Context, targets::TargetData, types::StructType, values::IntValue, AddressSpace,
 };
 
-#[repr(C)]
 #[derive(Clone, Debug)]
-pub struct TransactionContext {
-    address: U256,
-    caller: U256,
-    gas_price: U256,
-    priority_fee: U256,
-    transact_to: U256,
-    value: U256,
-    chain_id: u64,
-    nonce: u64,
-    gas_limit: u64,
-    data: usize,
-    len: usize,
+pub struct TransactionConfig {
+    pub caller: Address,
+    pub gas_price: U256,
+    pub priority_fee: U256,
+    // TODO: call or create
+    pub transact_to: Address,
+    pub value: U256,
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub gas_limit: u64,
+    // TODO: access lists...
+    // TODO: EIP-4844 blob hashes & gas
 }
 
-impl Default for TransactionContext {
-    fn default() -> TransactionContext {
-        TransactionContext {
-            address: U256::ZERO,
-            caller: U256::ZERO,
+impl Default for TransactionConfig {
+    fn default() -> TransactionConfig {
+        TransactionConfig {
+            caller: Address::ZERO,
             gas_price: U256::ZERO,
             priority_fee: U256::ZERO,
-            transact_to: U256::ZERO,
+            transact_to: Address::ZERO,
             value: U256::ZERO,
             chain_id: 1,
             nonce: 0,
             gas_limit: u64::MAX,
-            data: 0,
-            len: 0,
         }
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct TransactionContext {
+    pub caller: U256,
+    pub gas_price: U256,
+    pub priority_fee: U256,
+    pub transact_to: U256,
+    pub value: U256,
+    pub chain_id: u64,
+    pub nonce: u64,
+    pub gas_limit: u64,
+}
+
 impl TransactionContext {
+    pub fn from_config(cfg: TransactionConfig) -> TransactionContext {
+        let TransactionConfig {
+            caller,
+            gas_price,
+            priority_fee,
+            transact_to,
+            value,
+            chain_id,
+            nonce,
+            gas_limit,
+        } = cfg;
+
+        TransactionContext {
+            caller: caller.into_word().into(),
+            gas_price,
+            priority_fee,
+            transact_to: transact_to.into_word().into(),
+            value,
+            chain_id,
+            nonce,
+            gas_limit,
+        }
+    }
+
+    pub fn caller_address(&self) -> Address {
+        Address::from_word(self.caller.into())
+    }
+
     pub fn contract_address(&self) -> Address {
-        Address::from_word(self.address.into())
-    }
-
-    pub fn set_contract_address(&mut self, address: Address) {
-        self.address = address.into_word().into();
-    }
-
-    pub fn set_gas_limit(&mut self, gas_limit: u64) {
-        self.gas_limit = gas_limit;
+        Address::from_word(self.transact_to.into())
     }
 }
 
@@ -63,7 +90,6 @@ impl<'ctx> TransactionContext {
             .ptr_type(AddressSpace::default());
 
         let fields = vec![
-            u256_type.into(), // address
             u256_type.into(), // caller
             u256_type.into(), // gas_price
             u256_type.into(), // priority_fee
@@ -72,8 +98,6 @@ impl<'ctx> TransactionContext {
             i64_type.into(),  // chain_id
             i64_type.into(),  // nonce
             i64_type.into(),  // gas_limit
-            ptr_type.into(),  // data
-            i64_type.into(),  // len
         ];
         ctx.struct_type(&fields, false)
     }
@@ -95,7 +119,7 @@ impl<'ctx> TransactionContext {
         let ptr = ctx.builder.build_struct_gep(
             ctx.types.transaction_context,
             ptr,
-            8,
+            7,
             "get_tx_gas_limit",
         )?;
 

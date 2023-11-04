@@ -1,6 +1,7 @@
+use crate::jit::gas::{sload_gas, sstore_gas};
 use alloy_primitives::{Address, B256, U256};
 use revm_primitives::{
-    db::Database, hash_map::Entry, Account, AccountInfo, Bytecode, State, StorageSlot,
+    db::Database, hash_map::Entry, Account, AccountInfo, Bytecode, Spec, State, StorageSlot,
 };
 
 pub type DBBox<'a, E> = Box<dyn Database<Error = E> + Send + 'a>;
@@ -13,10 +14,12 @@ pub struct EVMState {
     code_by_hash: unsafe fn(*const (), B256) -> Bytecode,
     storage: unsafe fn(*const (), Address, U256) -> U256,
     block_hash: unsafe fn(*const (), U256) -> B256,
+    sload_gas: fn(bool) -> u64,
+    sstore_gas: fn(U256, U256, U256, bool) -> (u64, u64),
 }
 
 impl EVMState {
-    pub fn with_db<DB: Database>(db: &DB) -> EVMState {
+    pub fn with_db<DB: Database, SPEC: Spec>(db: &DB) -> EVMState {
         EVMState {
             state: Default::default(),
             db: db as *const _ as *const (),
@@ -24,6 +27,8 @@ impl EVMState {
             code_by_hash: code_by_hash::<DB>,
             storage: storage::<DB>,
             block_hash: block_hash::<DB>,
+            sload_gas: sload_gas::<SPEC>,
+            sstore_gas: sstore_gas::<SPEC>,
         }
     }
 
@@ -130,8 +135,9 @@ unsafe fn block_hash<DB: Database>(db: *const (), block: U256) -> B256 {
 mod test {
     use super::*;
 
-    use alloy_primitives::{address, uint, Uint};
+    use alloy_primitives::{address, uint};
     use revm::db::InMemoryDB;
+    use revm_primitives::LatestSpec;
 
     const ADDRESS: Address = address!("3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD");
     const ADDRESS_EMPTY: Address = address!("d4E96eF8eee8678dBFf4d535E033Ed1a4F7605b7");
@@ -163,7 +169,7 @@ mod test {
     fn test_db_sload_sstore() {
         let db = init_db();
 
-        let mut evm_state = EVMState::with_db(&db);
+        let mut evm_state = EVMState::with_db::<InMemoryDB, LatestSpec>(&db);
         let _ = evm_state.load_account(ADDRESS);
         let _ = evm_state.load_account(ADDRESS_EMPTY);
 

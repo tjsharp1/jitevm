@@ -1,6 +1,7 @@
 use crate::constants::*;
 use crate::jit::{contract::BuilderContext, error::JitEvmEngineError};
-use alloy_primitives::U256;
+use alloy_primitives::{Address, B256, U256};
+use bytes::Bytes;
 use inkwell::{
     context::Context,
     targets::TargetData,
@@ -8,19 +9,22 @@ use inkwell::{
     values::{IntValue, PointerValue},
     AddressSpace,
 };
-use revm_primitives::{db::Database, State};
+use revm_primitives::{db::Database, Spec, State};
 
 mod block;
 mod result;
 mod state;
 mod transaction;
 
-pub use block::BlockContext;
+pub(in crate::jit) use block::BlockContext;
+pub(in crate::jit) use result::{JitContractExecutionResult, JitContractResultCode};
+pub(in crate::jit) use transaction::TransactionContext;
+
+pub use block::BlockConfig;
 pub use result::{ExecutionResult, Halt, Success};
-pub(crate) use result::{JitContractExecutionResult, JitContractResultCode};
 pub use state::DBBox;
 use state::EVMState;
-pub use transaction::TransactionContext;
+pub use transaction::TransactionConfig;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -33,6 +37,8 @@ pub(in crate::jit) struct JitEvmPtrs {
     pub memory: usize,
     pub block_context: usize,
     pub transaction_context: usize,
+    pub calldata: usize,
+    pub calldatalen: usize,
     pub evm_state: usize,
 }
 
@@ -47,6 +53,8 @@ impl<'ctx> JitEvmPtrs {
             ptr_type.into(), // memory
             ptr_type.into(), // block_context
             ptr_type.into(), // transaction_context
+            ptr_type.into(), // calldata
+            ptr_type.into(), // calldatalen
             ptr_type.into(), // evm_state
         ];
         ctx.struct_type(&fields, false)
@@ -118,12 +126,14 @@ impl JitEvmPtrs {
         unsafe { *(ptr as *mut _) }
     }
 
-    pub fn from_context(ctx: &mut JitEvmExecutionContext) -> JitEvmPtrs {
+    pub fn from_context<SPEC: Spec>(ctx: &mut JitEvmExecutionContext<SPEC>) -> JitEvmPtrs {
         JitEvmPtrs {
             stack: ctx.stack.as_mut_ptr() as usize,
             memory: ctx.memory.as_mut_ptr() as usize,
             block_context: &mut ctx.block_context as *mut _ as usize,
             transaction_context: &mut ctx.transaction_context as *mut _ as usize,
+            calldata: ctx.calldata.as_ptr() as usize,
+            calldatalen: ctx.calldata.len(),
             evm_state: &mut ctx.evm_state as *mut _ as usize,
         }
     }
@@ -157,25 +167,101 @@ impl JitEvmPtrs {
     }
 }
 
-#[derive(Debug)]
-pub struct JitEvmExecutionContext {
-    pub stack: Vec<U256>,
-    pub memory: Vec<u8>,
-    pub block_context: BlockContext,
-    pub transaction_context: TransactionContext,
-    pub evm_state: EVMState,
+#[derive(Debug, Default)]
+pub struct JitEvmExecutionContextBuilder<SPEC: Spec> {
+    spec: SPEC,
+    block: Option<BlockConfig>,
+    transaction: Option<TransactionConfig>,
+    calldata: Option<Bytes>,
 }
 
-impl JitEvmExecutionContext {
-    pub fn new_with_db<DB: Database>(db: &DB) -> Self {
-        let evm_state = EVMState::with_db(db);
+impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
+    pub fn with_block_config(mut self, cfg: BlockConfig) -> Self {
+        self.block = Some(cfg);
+        self
+    }
 
-        Self {
+    pub fn with_transaction_config(mut self, cfg: TransactionConfig) -> Self {
+        self.transaction = Some(cfg);
+        self
+    }
+
+    pub fn with_calldata(mut self, data: Bytes) -> Self {
+        self.calldata = Some(data);
+        self
+    }
+
+    pub fn build_with_db<DB: Database>(self, db: &DB) -> JitEvmExecutionContext<SPEC> {
+        let mut evm_state = EVMState::with_db::<DB, SPEC>(db);
+
+        let cfg = self.block.unwrap_or_default();
+        let block_context = BlockContext::from_config(cfg);
+
+        let cfg = self.transaction.unwrap_or_default();
+        let transaction_context = TransactionContext::from_config(cfg);
+
+        // preload caller and contract accounts
+        evm_state.load_account(transaction_context.caller_address());
+        evm_state.load_account(transaction_context.contract_address());
+
+        let calldata = self.calldata.unwrap_or_default();
+
+        JitEvmExecutionContext {
             stack: vec![U256::ZERO; EVM_STACK_SIZE],
             memory: vec![0u8; EVM_MEMORY_BYTES],
-            block_context: BlockContext::new(),
-            transaction_context: Default::default(),
+            block_context,
+            transaction_context,
+            calldata,
             evm_state,
+            spec: self.spec,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct JitEvmExecutionContext<SPEC: Spec> {
+    pub stack: Vec<U256>,
+    pub memory: Vec<u8>,
+    block_context: BlockContext,
+    transaction_context: TransactionContext,
+    calldata: Bytes,
+    evm_state: EVMState,
+    spec: SPEC,
+}
+
+impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
+    pub fn set_number(&mut self, num: U256) {
+        self.block_context.number = num;
+    }
+
+    pub fn set_coinbase(&mut self, coinbase: Address) {
+        self.block_context.coinbase = coinbase.into_word().into();
+    }
+
+    pub fn set_timestamp(&mut self, ts: U256) {
+        self.block_context.timestamp = ts;
+    }
+
+    pub fn set_prevrandao(&mut self, randao: B256) {
+        self.block_context.prevrandao = randao.into();
+    }
+
+    pub fn set_basefee(&mut self, basefee: U256) {
+        self.block_context.basefee = basefee;
+    }
+
+    pub fn set_block_gas_limit(&mut self, gas_limit: U256) {
+        self.block_context.gas_limit = gas_limit;
+    }
+}
+
+impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
+    pub fn builder(spec: SPEC) -> JitEvmExecutionContextBuilder<SPEC> {
+        JitEvmExecutionContextBuilder {
+            spec,
+            block: None,
+            transaction: None,
+            calldata: None,
         }
     }
 

@@ -18,7 +18,9 @@ mod ops;
 
 use ffi::*;
 
-pub use context::{DBBox, ExecutionResult, Halt, JitEvmExecutionContext, Success};
+pub use context::{
+    BlockConfig, DBBox, ExecutionResult, Halt, JitEvmExecutionContext, Success, TransactionConfig,
+};
 pub use error::JitEvmEngineError;
 
 pub mod contract;

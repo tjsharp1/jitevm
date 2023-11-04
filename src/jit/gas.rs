@@ -1,5 +1,6 @@
 use crate::code::EvmOp;
-use crate::spec::SpecId;
+use alloy_primitives::U256;
+use revm_primitives::{Spec, SpecId};
 
 const ZERO_DATA_COST: u64 = 4;
 // TODO: changes depending on EIP-2028
@@ -22,6 +23,7 @@ macro_rules! build_sha3_gas_check {
             .expect("Expect intrinsic declaration not found!");
 
         let const_true = $ctx.types.type_bool.const_int(1, false);
+        let const_0 = $ctx.types.type_i64.const_int(0, false);
         let const_5 = $ctx.types.type_i64.const_int(5, false);
         let const_31 = $ctx.types.type_i64.const_int(31, false);
 
@@ -29,13 +31,21 @@ macro_rules! build_sha3_gas_check {
         let i1 = $ctx.builder.build_int_add(len, const_31, "")?;
         let word_size = $ctx.builder.build_right_shift(i1, const_5, false, "")?;
 
-        let (static_gas, dynamic_gas) = $ctx.gas.sha3_gas();
+        let (static_gas, dynamic_gas) = sha3_gas::<SPEC>();
 
         let static_gas = $ctx.types.type_i64.const_int(static_gas, false);
         let dynamic_gas = $ctx.types.type_i64.const_int(dynamic_gas, false);
 
         let d1 = $ctx.builder.build_int_mul(dynamic_gas, word_size, "")?;
         let dynamic = $ctx.builder.build_int_add(d1, expansion_cost, "")?;
+
+        let iszero =
+            $ctx.builder
+                .build_int_compare(IntPredicate::EQ, len, const_0, "sha3_iszero")?;
+        let dynamic = $ctx
+            .builder
+            .build_select(iszero, const_0, dynamic, "dynamic_sha3")?
+            .into_int_value();
 
         let gas_cost = $ctx.builder.build_int_add(static_gas, dynamic, "")?;
 
@@ -81,7 +91,7 @@ macro_rules! build_sha3_gas_check {
 
 macro_rules! memory_expansion_cost {
     ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {{
-        let mem_gas = $ctx.gas.memory_gas();
+        let mem_gas = memory_gas::<SPEC>();
 
         let const_0 = $ctx.types.type_i64.const_int(0, false);
         let const_1 = $ctx.types.type_i64.const_int(1, false);
@@ -100,6 +110,14 @@ macro_rules! memory_expansion_cost {
         let i3 = $ctx.builder.build_int_add(i2, const_1, "")?;
         let i4 = $ctx.builder.build_and(i3, const_31, "")?;
         let new_size = $ctx.builder.build_int_add(i0, i4, "")?;
+
+        let iszero =
+            $ctx.builder
+                .build_int_compare(IntPredicate::EQ, len, const_0, "len_is_zero")?;
+        let new_size = $ctx
+            .builder
+            .build_select(iszero, $book.mem_size, new_size, "new_size")?
+            .into_int_value();
 
         let has_grown =
             $ctx.builder
@@ -156,7 +174,7 @@ macro_rules! build_memory_gas_check {
             .expect("Expect intrinsic declaration not found!");
 
         let (book, expansion_cost) = memory_expansion_cost!($ctx, $current, $book, $offset, $len);
-        let const_cost = $ctx.gas.const_cost($current.op());
+        let const_cost = const_cost::<SPEC>($current.op());
         let const_cost = $ctx.types.type_i64.const_int(const_cost, false);
         let gas_cost = $ctx.builder.build_int_add(const_cost, expansion_cost, "")?;
 
@@ -216,7 +234,7 @@ macro_rules! build_gas_check {
 
         let book = $current.book();
 
-        let gas_cost = $ctx.gas.const_cost($current.op());
+        let gas_cost = const_cost::<SPEC>($current.op());
         let gas_cost = $ctx.types.type_i64.const_int(gas_cost, false);
 
         let cmp =
@@ -279,7 +297,7 @@ macro_rules! build_gas_check_exp {
 
         let book = $current.book();
 
-        let (base_gas, byte_gas) = $ctx.gas.exp_cost();
+        let (base_gas, byte_gas) = exp_cost::<SPEC>();
         let base_gas_cost = $ctx.types.type_i64.const_int(base_gas, false);
         let byte_gas_cost = $ctx.types.type_i64.const_int(byte_gas, false);
 
@@ -340,188 +358,143 @@ macro_rules! build_gas_check_exp {
     }};
 }
 
-// TODO: only supporting LATEST spec now, but more later
-#[derive(Debug, Clone)]
-pub struct Gas {
-    spec_id: SpecId,
+pub fn init_gas<SPEC: Spec>(calldata: &[u8]) -> u64 {
+    if SPEC::enabled(SpecId::LATEST) {
+        INIT_TX_COST
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
+    }
 }
 
-impl Gas {
-    pub fn new(spec_id: SpecId) -> Self {
-        Self { spec_id }
+pub fn sload_gas<SPEC: Spec>(warm: bool) -> u64 {
+    if SPEC::enabled(SpecId::LATEST) {
+        if warm {
+            100
+        } else {
+            2100
+        }
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
     }
+}
 
-    pub fn set_spec_id(&mut self, spec_id: SpecId) {
-        self.spec_id = spec_id
+pub fn sstore_gas<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> (u64, u64) {
+    if SPEC::enabled(SpecId::LATEST) {
+        todo!("SSTORE stuff")
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
     }
+}
 
-    pub fn init_gas(&self, calldata: &[u8]) -> u64 {
-        INIT_TX_COST
-    }
-
-    pub fn memory_gas(&self) -> u64 {
+pub fn memory_gas<SPEC: Spec>() -> u64 {
+    if SPEC::enabled(SpecId::LATEST) {
         3
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
     }
+}
 
-    pub fn sha3_gas(&self) -> (u64, u64) {
+pub fn sha3_gas<SPEC: Spec>() -> (u64, u64) {
+    if SPEC::enabled(SpecId::LATEST) {
         (30, 6)
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
     }
+}
 
-    pub fn exp_cost(&self) -> (u64, u64) {
+pub fn exp_cost<SPEC: Spec>() -> (u64, u64) {
+    if SPEC::enabled(SpecId::LATEST) {
         (10, 50)
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
+    }
+}
+
+pub fn const_cost<SPEC: Spec>(op: EvmOp) -> u64 {
+    if !SPEC::enabled(SpecId::LATEST) {
+        unimplemented!("Only LATEST implemented currently!");
     }
 
-    pub fn is_const_gas(&self, op: EvmOp) -> bool {
-        match op {
-            EvmOp::Iszero => true,
-            EvmOp::Byte => true,
-            EvmOp::Add => true,
-            EvmOp::Mul => true,
-            EvmOp::Sub => true,
-            EvmOp::Div => true,
-            EvmOp::Sdiv => true,
-            EvmOp::Mod => true,
-            EvmOp::Smod => true,
-            EvmOp::Shl => true,
-            EvmOp::Shr => true,
-            EvmOp::Sar => true,
-            EvmOp::And => true,
-            EvmOp::Or => true,
-            EvmOp::Xor => true,
-            EvmOp::Eq => true,
-            EvmOp::Lt => true,
-            EvmOp::Gt => true,
-            EvmOp::Slt => true,
-            EvmOp::Sgt => true,
-            EvmOp::Not => true,
-            EvmOp::Signextend => true,
-            EvmOp::Addmod => true,
-            EvmOp::Mulmod => true,
-            EvmOp::Push(_, _) => true,
-            EvmOp::Pop => true,
-            EvmOp::Dup1 => true,
-            EvmOp::Dup2 => true,
-            EvmOp::Dup3 => true,
-            EvmOp::Dup4 => true,
-            EvmOp::Dup5 => true,
-            EvmOp::Dup6 => true,
-            EvmOp::Dup7 => true,
-            EvmOp::Dup8 => true,
-            EvmOp::Dup9 => true,
-            EvmOp::Dup10 => true,
-            EvmOp::Dup11 => true,
-            EvmOp::Dup12 => true,
-            EvmOp::Dup13 => true,
-            EvmOp::Dup14 => true,
-            EvmOp::Dup15 => true,
-            EvmOp::Dup16 => true,
-            EvmOp::Swap1 => true,
-            EvmOp::Swap2 => true,
-            EvmOp::Swap3 => true,
-            EvmOp::Swap4 => true,
-            EvmOp::Swap5 => true,
-            EvmOp::Swap6 => true,
-            EvmOp::Swap7 => true,
-            EvmOp::Swap8 => true,
-            EvmOp::Swap9 => true,
-            EvmOp::Swap10 => true,
-            EvmOp::Swap11 => true,
-            EvmOp::Swap12 => true,
-            EvmOp::Swap13 => true,
-            EvmOp::Swap14 => true,
-            EvmOp::Swap15 => true,
-            EvmOp::Swap16 => true,
-            EvmOp::Jumpdest => true,
-            EvmOp::Jumpi => true,
-            EvmOp::Jump => true,
-            EvmOp::AugmentedPushJumpi(_, _) => true,
-            EvmOp::AugmentedPushJump(_, _) => true,
-            _ => false,
-        }
-    }
-
-    pub fn const_cost(&self, op: EvmOp) -> u64 {
-        match op {
-            EvmOp::Iszero => 3,
-            EvmOp::Byte => 3,
-            EvmOp::Add => 3,
-            EvmOp::Mul => 5,
-            EvmOp::Sub => 3,
-            EvmOp::Div => 5,
-            EvmOp::Sdiv => 5,
-            EvmOp::Mod => 5,
-            EvmOp::Smod => 5,
-            EvmOp::Shl => 3,
-            EvmOp::Shr => 3,
-            EvmOp::Sar => 3,
-            EvmOp::And => 3,
-            EvmOp::Or => 3,
-            EvmOp::Xor => 3,
-            EvmOp::Eq => 3,
-            EvmOp::Lt => 3,
-            EvmOp::Gt => 3,
-            EvmOp::Slt => 3,
-            EvmOp::Sgt => 3,
-            EvmOp::Not => 3,
-            EvmOp::Signextend => 3,
-            EvmOp::Addmod => 8,
-            EvmOp::Mulmod => 8,
-            EvmOp::Push(len, _) => {
-                if len == 0 {
-                    2
-                } else {
-                    3
-                }
+    match op {
+        EvmOp::Iszero => 3,
+        EvmOp::Byte => 3,
+        EvmOp::Add => 3,
+        EvmOp::Mul => 5,
+        EvmOp::Sub => 3,
+        EvmOp::Div => 5,
+        EvmOp::Sdiv => 5,
+        EvmOp::Mod => 5,
+        EvmOp::Smod => 5,
+        EvmOp::Shl => 3,
+        EvmOp::Shr => 3,
+        EvmOp::Sar => 3,
+        EvmOp::And => 3,
+        EvmOp::Or => 3,
+        EvmOp::Xor => 3,
+        EvmOp::Eq => 3,
+        EvmOp::Lt => 3,
+        EvmOp::Gt => 3,
+        EvmOp::Slt => 3,
+        EvmOp::Sgt => 3,
+        EvmOp::Not => 3,
+        EvmOp::Signextend => 3,
+        EvmOp::Addmod => 8,
+        EvmOp::Mulmod => 8,
+        EvmOp::Push(len, _) => {
+            if len == 0 {
+                2
+            } else {
+                3
             }
-            EvmOp::Pop => 2,
-            EvmOp::Dup1 => 3,
-            EvmOp::Dup2 => 3,
-            EvmOp::Dup3 => 3,
-            EvmOp::Dup4 => 3,
-            EvmOp::Dup5 => 3,
-            EvmOp::Dup6 => 3,
-            EvmOp::Dup7 => 3,
-            EvmOp::Dup8 => 3,
-            EvmOp::Dup9 => 3,
-            EvmOp::Dup10 => 3,
-            EvmOp::Dup11 => 3,
-            EvmOp::Dup12 => 3,
-            EvmOp::Dup13 => 3,
-            EvmOp::Dup14 => 3,
-            EvmOp::Dup15 => 3,
-            EvmOp::Dup16 => 3,
-            EvmOp::Swap1 => 3,
-            EvmOp::Swap2 => 3,
-            EvmOp::Swap3 => 3,
-            EvmOp::Swap4 => 3,
-            EvmOp::Swap5 => 3,
-            EvmOp::Swap6 => 3,
-            EvmOp::Swap7 => 3,
-            EvmOp::Swap8 => 3,
-            EvmOp::Swap9 => 3,
-            EvmOp::Swap10 => 3,
-            EvmOp::Swap11 => 3,
-            EvmOp::Swap12 => 3,
-            EvmOp::Swap13 => 3,
-            EvmOp::Swap14 => 3,
-            EvmOp::Swap15 => 3,
-            EvmOp::Swap16 => 3,
-            EvmOp::Jumpdest => 1,
-            EvmOp::Jumpi => 10,
-            EvmOp::Jump => 8,
-            EvmOp::Mload => 3,
-            EvmOp::Mstore => 3,
-            EvmOp::Mstore8 => 3,
-            EvmOp::Number => 2,
-            EvmOp::Coinbase => 2,
-            EvmOp::Timestamp => 2,
-            EvmOp::PrevRandao => 2,
-            EvmOp::BaseFee => 2,
-            EvmOp::GasLimit => 2,
-            EvmOp::AugmentedPushJumpi(_, _) => 13,
-            EvmOp::AugmentedPushJump(_, _) => 11,
-            _ => unimplemented!("Gas cost for {:?} unimplemented!", op),
         }
+        EvmOp::Pop => 2,
+        EvmOp::Dup1 => 3,
+        EvmOp::Dup2 => 3,
+        EvmOp::Dup3 => 3,
+        EvmOp::Dup4 => 3,
+        EvmOp::Dup5 => 3,
+        EvmOp::Dup6 => 3,
+        EvmOp::Dup7 => 3,
+        EvmOp::Dup8 => 3,
+        EvmOp::Dup9 => 3,
+        EvmOp::Dup10 => 3,
+        EvmOp::Dup11 => 3,
+        EvmOp::Dup12 => 3,
+        EvmOp::Dup13 => 3,
+        EvmOp::Dup14 => 3,
+        EvmOp::Dup15 => 3,
+        EvmOp::Dup16 => 3,
+        EvmOp::Swap1 => 3,
+        EvmOp::Swap2 => 3,
+        EvmOp::Swap3 => 3,
+        EvmOp::Swap4 => 3,
+        EvmOp::Swap5 => 3,
+        EvmOp::Swap6 => 3,
+        EvmOp::Swap7 => 3,
+        EvmOp::Swap8 => 3,
+        EvmOp::Swap9 => 3,
+        EvmOp::Swap10 => 3,
+        EvmOp::Swap11 => 3,
+        EvmOp::Swap12 => 3,
+        EvmOp::Swap13 => 3,
+        EvmOp::Swap14 => 3,
+        EvmOp::Swap15 => 3,
+        EvmOp::Swap16 => 3,
+        EvmOp::Jumpdest => 1,
+        EvmOp::Jumpi => 10,
+        EvmOp::Jump => 8,
+        EvmOp::Mload => 3,
+        EvmOp::Mstore => 3,
+        EvmOp::Mstore8 => 3,
+        EvmOp::Number => 2,
+        EvmOp::Coinbase => 2,
+        EvmOp::Timestamp => 2,
+        EvmOp::PrevRandao => 2,
+        EvmOp::BaseFee => 2,
+        EvmOp::GasLimit => 2,
+        EvmOp::AugmentedPushJumpi(_, _) => 13,
+        EvmOp::AugmentedPushJump(_, _) => 11,
+        _ => unimplemented!("Gas cost for {:?} unimplemented!", op),
     }
 }
 

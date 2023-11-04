@@ -10,6 +10,7 @@ use revm::{
     primitives::{address, Address, Bytecode, Bytes, Env, U256},
     EVM,
 };
+use revm_primitives::{LatestSpec, Spec};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -26,7 +27,7 @@ fn load_evm_code(test_name: &str) -> EvmCode {
     EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
 }
 
-fn interp_get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
+fn get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
     let bytes = Bytes::copy_from_slice(&code.to_bytes());
     let bytecode = Bytecode::new_raw(bytes).to_checked();
     let database = BenchmarkDB::new_bytecode(bytecode);
@@ -39,22 +40,22 @@ fn interp_get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
 
 pub fn evm_benchmark(c: &mut Criterion) {
     let code = load_evm_code("fibonacci");
-    let args1 = interp_get_env_args(code);
+    let args1 = get_env_args(code);
 
     let code = load_evm_code("fibonacci_repetitions");
-    let args2 = interp_get_env_args(code);
+    let args2 = get_env_args(code);
 
     let code = load_evm_code("exp");
-    let args3 = interp_get_env_args(code);
+    let args3 = get_env_args(code);
 
     let code = load_evm_code("mload");
-    let args4 = interp_get_env_args(code);
+    let args4 = get_env_args(code);
 
     let code = load_evm_code("mstore8");
-    let args5 = interp_get_env_args(code);
+    let args5 = get_env_args(code);
 
     let code = load_evm_code("sha3");
-    let args6 = interp_get_env_args(code);
+    let args6 = get_env_args(code);
 
     let mut group = c.benchmark_group("REVM benchmarks");
     group.measurement_time(Duration::from_secs(30));
@@ -85,73 +86,91 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
     let context = Context::create();
 
     let code = load_evm_code("fibonacci");
+    let (_, args1) = get_env_args(code.clone());
     let contract1 = JitContractBuilder::with_context("contract1", &context)
         .expect("Could not build builder")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let code = load_evm_code("fibonacci_repetitions");
+    let (_, args2) = get_env_args(code.clone());
     let contract2 = JitContractBuilder::with_context("contract2", &context)
         .expect("Could not build builder")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let code = load_evm_code("exp");
+    let (_, args3) = get_env_args(code.clone());
     let contract3 = JitContractBuilder::with_context("contract3", &context)
         .expect("Could not build builder")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let code = load_evm_code("mload");
+    let (_, args4) = get_env_args(code.clone());
     let contract4 = JitContractBuilder::with_context("contract4", &context)
         .expect("Could not build builder")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let code = load_evm_code("mstore8");
+    let (_, args5) = get_env_args(code.clone());
     let contract5 = JitContractBuilder::with_context("contract5", &context)
         .expect("Could not build builder")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let code = load_evm_code("sha3");
+    let (_, args6) = get_env_args(code.clone());
     let contract6 = JitContractBuilder::with_context("contract6", &context)
         .expect("Could not build builder")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let mut group = c.benchmark_group("JIT benchmarks");
     group.measurement_time(Duration::from_secs(30));
-    group.bench_with_input(BenchmarkId::new("JIT", "fibonacci"), &contract1, |b, i| {
-        b.iter(|| jitevm_bench(i))
-    });
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "fibonacci"),
+        &(args1, contract1),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
     group.bench_with_input(
         BenchmarkId::new("JIT", "fibonacci_repetitions"),
-        &contract2,
-        |b, i| b.iter(|| jitevm_bench(i)),
+        &(args2, contract2),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
     );
-    group.bench_with_input(BenchmarkId::new("JIT", "exp"), &contract3, |b, i| {
-        b.iter(|| jitevm_bench(i))
-    });
-    group.bench_with_input(BenchmarkId::new("JIT", "mload"), &contract4, |b, i| {
-        b.iter(|| jitevm_bench(i))
-    });
-    group.bench_with_input(BenchmarkId::new("JIT", "mstore8"), &contract5, |b, i| {
-        b.iter(|| jitevm_bench(i))
-    });
-    group.bench_with_input(BenchmarkId::new("JIT", "sha3"), &contract6, |b, i| {
-        b.iter(|| jitevm_bench(i))
-    });
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "exp"),
+        &(args3, contract3),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "mload"),
+        &(args4, contract4),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "mstore8"),
+        &(args5, contract5),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "sha3"),
+        &(args6, contract6),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
     group.finish();
 }
 
 criterion_group!(benches, evm_benchmark, jitevm_benchmark);
 criterion_main!(benches);
 
-fn jitevm_bench<'ctx>(contract: &JitEvmContract<'ctx>) {
-    let mut holder = JitEvmExecutionContext::new();
-    let _result = contract
-        .call(&mut holder)
+fn jitevm_bench<'ctx, SPEC: Spec>(spec: SPEC, args: &(BenchmarkDB, JitEvmContract<'ctx, SPEC>)) {
+    let mut holder = JitEvmExecutionContext::builder(spec).build_with_db(&args.0);
+
+    let _result = args
+        .1
+        .transact(&mut holder)
         .expect("JIT contract call failed");
 }
 

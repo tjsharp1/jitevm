@@ -2,11 +2,11 @@ use super::{expect_halt, expect_stack_overflow, expect_stack_underflow, expect_s
 use crate::jit::{
     gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success, EVM_STACK_SIZE,
 };
-use crate::spec::SpecId;
 use alloy_primitives::U256;
 use paste::paste;
 use rand::Rng;
 use revm::db::InMemoryDB;
+use revm_primitives::LatestSpec;
 
 macro_rules! test_op_dup {
     ($fname:ident, $evmop:expr, $position:literal) => {
@@ -18,10 +18,9 @@ macro_rules! test_op_dup {
                 fn _test(values: Vec<U256>) {
                     let original_stack = values.clone();
 
-                    let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
-                    let op_cost = gas.const_cost($evmop);
-                    let init_cost = gas.init_gas(&[]);
+                    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                    let op_cost = gas::const_cost::<LatestSpec>($evmop);
+                    let init_cost = gas::init_gas::<LatestSpec>(&[]);
                     let expected_gas = init_cost + push_cost * values.len() as u64 + op_cost;
 
                     let mut ops = values
@@ -30,9 +29,9 @@ macro_rules! test_op_dup {
                         .collect::<Vec<_>>();
                     ops.push($evmop);
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-                    let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
+                    let result = test_jit(LatestSpec, ops.clone(), &mut ctx).expect("Contract build failed");
 
                     expect_success!($fname, result, Success::Stop, expected_gas);
                     let JitEvmExecutionContext { stack, .. } = ctx;
@@ -71,10 +70,9 @@ macro_rules! test_op_swap {
                 fn _test(values: Vec<U256>) {
                     let original_stack = values.clone();
 
-                    let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
-                    let op_cost = gas.const_cost($evmop);
-                    let init_cost = gas.init_gas(&[]);
+                    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                    let op_cost = gas::const_cost::<LatestSpec>($evmop);
+                    let init_cost = gas::init_gas::<LatestSpec>(&[]);
                     let expected_gas = init_cost + push_cost * values.len() as u64 + op_cost;
 
                     let mut ops = values
@@ -84,8 +82,8 @@ macro_rules! test_op_swap {
                     ops.push($evmop);
 
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
-                    let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+                    let result = test_jit(LatestSpec, ops.clone(), &mut ctx).expect("Contract build failed");
                     expect_success!($fname, result, Success::Stop, expected_gas);
 
                     let JitEvmExecutionContext { stack, .. } = ctx;

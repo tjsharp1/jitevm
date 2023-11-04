@@ -1,12 +1,16 @@
 use crate::jit::ops::stack::{build_stack_check, build_stack_pop};
 use crate::jit::{
-    context::JitContractResultCode, contract::BuilderContext, cursor::CurrentInstruction,
-    gas::build_gas_check, JitContractExecutionResult, JitEvmEngineError,
+    context::JitContractResultCode,
+    contract::BuilderContext,
+    cursor::CurrentInstruction,
+    gas::{build_gas_check, const_cost},
+    JitContractExecutionResult, JitEvmEngineError,
 };
 use alloy_primitives::U256;
 use inkwell::AddressSpace;
+use revm_primitives::Spec;
 
-pub(crate) fn build_stop_op<'a, 'ctx>(
+pub(crate) fn build_stop_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -18,7 +22,7 @@ pub(crate) fn build_stop_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_jumpdest_op<'a, 'ctx>(
+pub(crate) fn build_jumpdest_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -32,7 +36,7 @@ pub(crate) fn build_jumpdest_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_jump_op<'a, 'ctx>(
+pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -112,7 +116,7 @@ pub(crate) fn build_jump_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_jumpi_op<'a, 'ctx>(
+pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -200,7 +204,7 @@ pub(crate) fn build_jumpi_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_augmented_jump_op<'a, 'ctx>(
+pub(crate) fn build_augmented_jump_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
@@ -225,7 +229,7 @@ pub(crate) fn build_augmented_jump_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_augmented_jumpi_op<'a, 'ctx>(
+pub(crate) fn build_augmented_jumpi_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,

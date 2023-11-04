@@ -1,4 +1,4 @@
-use alloy_primitives::{uint, Uint, U256};
+use alloy_primitives::{uint, U256};
 use core::cmp::Ordering;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

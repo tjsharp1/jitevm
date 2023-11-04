@@ -8,6 +8,7 @@ use revm::{
     },
     EVM,
 };
+use revm_primitives::{LatestSpec, Spec};
 use std::path::PathBuf;
 
 fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
@@ -16,17 +17,16 @@ fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
         .expect("Could not build builder")
         .debug_ir("evm_equivalence.ll")
         .debug_asm("evm_equivalence.asm")
-        .build(code.augment().index())
+        .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
     let bytes = Bytes::copy_from_slice(&code.to_bytes());
     let bytecode = Bytecode::new_raw(bytes).to_checked();
     let database = BenchmarkDB::new_bytecode(bytecode);
 
-    let mut holder = JitEvmExecutionContext::new_with_db(&database);
-    holder.transaction_context.set_gas_limit(u64::MAX);
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&database);
     let result = contract
-        .transact(&mut holder)
+        .transact(&mut ctx)
         .expect("JIT contract call failed");
     result
 }

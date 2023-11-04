@@ -2,18 +2,18 @@ use super::{expect_halt, expect_success, test_jit};
 use crate::{
     code::EvmOp,
     jit::{gas, ExecutionResult, Halt, JitEvmEngineError, JitEvmExecutionContext, Success},
-    spec::SpecId,
 };
 use alloy_primitives::U256;
 use rand::{prelude::SliceRandom, Rng};
 use revm::InMemoryDB;
+use revm_primitives::LatestSpec;
 use std::ops::{BitAnd, Not};
 
 #[test]
 fn operations_test_jump() {
     for _ in 0..1000 {
         let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let jumpdest_offset = 0x20;
 
         let mut ops = Vec::new();
@@ -34,10 +34,10 @@ fn operations_test_jump() {
         ops.push(EvmOp::Push(32, U256::from(1)));
         ops.push(EvmOp::Push(32, U256::from(1)));
 
-        let mut slice = &mut execution_context.memory[jumpdest_offset..jumpdest_offset + 0x20];
+        let slice = &mut execution_context.memory[jumpdest_offset..jumpdest_offset + 0x20];
         slice.copy_from_slice(&jumpdest.to_be_bytes::<32>());
 
-        let result = test_jit(ops.clone(), &mut execution_context);
+        let result = test_jit(LatestSpec, ops.clone(), &mut execution_context);
         assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(2)));
 
         let key0 = U256::from(0x40);
@@ -60,17 +60,17 @@ fn operations_test_jump() {
         ops.push(EvmOp::Push(32, key1));
         ops.push(EvmOp::Mstore);
 
-        let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
+        let result =
+            test_jit(LatestSpec, ops.clone(), &mut execution_context).expect("Should return OK()");
 
-        let gas = gas::Gas::new(SpecId::LATEST);
-        let init_cost = gas.init_gas(&[]);
-        let jump_cost = gas.const_cost(EvmOp::Jump);
-        let jumpdest_cost = gas.const_cost(EvmOp::Jumpdest);
-        let push_cost = gas.const_cost(EvmOp::Push(32, U256::ZERO));
-        let mload_cost = gas.const_cost(EvmOp::Mload);
-        let mstore_cost = gas.const_cost(EvmOp::Mload);
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
+        let jump_cost = gas::const_cost::<LatestSpec>(EvmOp::Jump);
+        let jumpdest_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpdest);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let mload_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
+        let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
 
-        let mem_cost = gas.memory_gas();
+        let mem_cost = gas::memory_gas::<LatestSpec>();
 
         let offset = 0x80u64;
         let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
@@ -96,14 +96,13 @@ fn operations_test_jump() {
 
 #[test]
 fn test_jump_underflow() {
-    let gas = gas::Gas::new(SpecId::LATEST);
-    let init_cost = gas.init_gas(&[]);
-    let expected_gas = init_cost + gas.const_cost(EvmOp::Jump);
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+    let expected_gas = init_cost + gas::const_cost::<LatestSpec>(EvmOp::Jump);
     let db = InMemoryDB::default();
-    let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+    let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
     let ops = vec![EvmOp::Jump, EvmOp::Jumpdest];
-    let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
+    let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
     expect_halt!(jump_underflow, result, Halt::StackUnderflow, expected_gas);
 }
 
@@ -111,7 +110,7 @@ fn test_jump_underflow() {
 fn operations_test_jumpi() {
     for _ in 0..1000 {
         let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let jumpdest_offset = 0x20;
 
         let mut ops = Vec::new();
@@ -147,10 +146,10 @@ fn operations_test_jumpi() {
         ops.push(EvmOp::Push(32, U256::from(1)));
         ops.push(EvmOp::Push(32, U256::from(1)));
 
-        let mut slice = &mut execution_context.memory[jumpdest_offset..jumpdest_offset + 0x20];
+        let slice = &mut execution_context.memory[jumpdest_offset..jumpdest_offset + 0x20];
         slice.copy_from_slice(&jumpdest.to_be_bytes::<32>());
 
-        let result = test_jit(ops.clone(), &mut execution_context);
+        let result = test_jit(LatestSpec, ops.clone(), &mut execution_context);
         assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(3)));
 
         let value0_branch1 = U256::from(9);
@@ -178,17 +177,17 @@ fn operations_test_jumpi() {
         ops.push(EvmOp::Mstore);
         ops.push(EvmOp::Stop);
 
-        let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
+        let result =
+            test_jit(LatestSpec, ops.clone(), &mut execution_context).expect("Should return OK()");
 
-        let gas = gas::Gas::new(SpecId::LATEST);
-        let init_cost = gas.init_gas(&[]);
-        let jumpi_cost = gas.const_cost(EvmOp::Jumpi);
-        let jumpdest_cost = gas.const_cost(EvmOp::Jumpdest);
-        let push_cost = gas.const_cost(EvmOp::Push(32, U256::ZERO));
-        let mload_cost = gas.const_cost(EvmOp::Mload);
-        let mstore_cost = gas.const_cost(EvmOp::Mload);
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
+        let jumpi_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpi);
+        let jumpdest_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpdest);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let mload_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
+        let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
 
-        let mem_cost = gas.memory_gas();
+        let mem_cost = gas::memory_gas::<LatestSpec>();
 
         let offset = 0x80u64;
         let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
@@ -222,22 +221,21 @@ fn operations_test_jumpi() {
 #[test]
 fn test_jumpi_underflow() {
     let db = InMemoryDB::default();
-    let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+    let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
     let ops = vec![EvmOp::Jumpi, EvmOp::Jumpdest];
-    let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
+    let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
 
-    let gas = gas::Gas::new(SpecId::LATEST);
-    let init_cost = gas.init_gas(&[]);
-    let jumpi_cost = gas.const_cost(EvmOp::Jumpi);
-    let mload_cost = gas.const_cost(EvmOp::Mload);
-    let push_cost = gas.const_cost(EvmOp::Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+    let jumpi_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpi);
+    let mload_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
+    let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
 
     let expected_gas = init_cost + jumpi_cost;
     expect_halt!(jumpi_underflow1, result, Halt::StackUnderflow, expected_gas);
 
     let db = InMemoryDB::default();
-    let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+    let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
     let ops = vec![
         EvmOp::Push(32, U256::ZERO),
@@ -245,9 +243,9 @@ fn test_jumpi_underflow() {
         EvmOp::Jumpi,
         EvmOp::Jumpdest,
     ];
-    let result = test_jit(ops, &mut execution_context).expect("Should return OK()");
+    let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
 
-    let mem_cost = gas.memory_gas();
+    let mem_cost = gas::memory_gas::<LatestSpec>();
 
     let offset = 0x20u64;
     let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
@@ -263,7 +261,7 @@ fn test_jumpi_underflow() {
 #[test]
 fn operations_test_augmented_jump() {
     let db = InMemoryDB::default();
-    let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+    let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
     let mut ops = Vec::new();
     let key0 = U256::ZERO;
@@ -286,7 +284,7 @@ fn operations_test_augmented_jump() {
     ops.push(EvmOp::Push(32, U256::from(1)));
     ops.push(EvmOp::Push(32, U256::from(1)));
 
-    let result = test_jit(ops.clone(), &mut execution_context);
+    let result = test_jit(LatestSpec, ops.clone(), &mut execution_context);
     assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(0)));
 
     let value0 = U256::from(9);
@@ -307,16 +305,16 @@ fn operations_test_augmented_jump() {
     ops.push(EvmOp::Push(32, key1));
     ops.push(EvmOp::Mstore);
 
-    let result = test_jit(ops.clone(), &mut execution_context).expect("Should return OK()");
+    let result =
+        test_jit(LatestSpec, ops.clone(), &mut execution_context).expect("Should return OK()");
 
-    let gas = gas::Gas::new(SpecId::LATEST);
-    let init_cost = gas.init_gas(&[]);
-    let jump_cost = gas.const_cost(EvmOp::Jump);
-    let jumpdest_cost = gas.const_cost(EvmOp::Jumpdest);
-    let push_cost = gas.const_cost(EvmOp::Push(32, U256::ZERO));
-    let mstore_cost = gas.const_cost(EvmOp::Mload);
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+    let jump_cost = gas::const_cost::<LatestSpec>(EvmOp::Jump);
+    let jumpdest_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpdest);
+    let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+    let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
 
-    let mem_cost = gas.memory_gas();
+    let mem_cost = gas::memory_gas::<LatestSpec>();
 
     let offset = 0x40u64;
     let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
@@ -338,7 +336,7 @@ fn operations_test_augmented_jump() {
 fn operations_test_augmented_jumpi() {
     for _ in 0..1000 {
         let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
         let mut ops = Vec::new();
 
@@ -376,7 +374,7 @@ fn operations_test_augmented_jumpi() {
         ops.push(EvmOp::Push(32, U256::from(1)));
         ops.push(EvmOp::Push(32, U256::from(1)));
 
-        let result = test_jit(ops.clone(), &mut execution_context);
+        let result = test_jit(LatestSpec, ops.clone(), &mut execution_context);
         assert_eq!(result, Err(JitEvmEngineError::NoValidJumpDestinations(1)));
 
         let value0_branch1 = U256::from(9);
@@ -404,16 +402,16 @@ fn operations_test_augmented_jumpi() {
         ops.push(EvmOp::Mstore);
         ops.push(EvmOp::Stop);
 
-        let result = test_jit(ops.clone(), &mut execution_context).expect("Should be Ok()");
+        let result =
+            test_jit(LatestSpec, ops.clone(), &mut execution_context).expect("Should be Ok()");
 
-        let gas = gas::Gas::new(SpecId::LATEST);
-        let init_cost = gas.init_gas(&[]);
-        let jumpi_cost = gas.const_cost(EvmOp::Jumpi);
-        let jumpdest_cost = gas.const_cost(EvmOp::Jumpdest);
-        let push_cost = gas.const_cost(EvmOp::Push(32, U256::ZERO));
-        let mstore_cost = gas.const_cost(EvmOp::Mstore);
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
+        let jumpi_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpi);
+        let jumpdest_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpdest);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
 
-        let mem_cost = gas.memory_gas();
+        let mem_cost = gas::memory_gas::<LatestSpec>();
 
         let offset = 0x40u64;
         let up = offset.bitand(31).not().wrapping_add(1).bitand(31);

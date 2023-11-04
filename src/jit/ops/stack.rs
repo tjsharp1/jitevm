@@ -1,10 +1,14 @@
 use crate::jit::{
-    contract::BuilderContext, cursor::CurrentInstruction, gas::build_gas_check, JitEvmEngineError,
+    contract::BuilderContext,
+    cursor::CurrentInstruction,
+    gas::{build_gas_check, const_cost},
+    JitEvmEngineError,
 };
 use alloy_primitives::U256;
 use inkwell::AddressSpace;
+use revm_primitives::Spec;
 
-pub(crate) fn build_push_op<'a, 'ctx>(
+pub(crate) fn build_push_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     val: U256,
@@ -25,7 +29,7 @@ pub(crate) fn build_push_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_pop_op<'a, 'ctx>(
+pub(crate) fn build_pop_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -304,7 +308,7 @@ macro_rules! build_stack_read {
     }};
 }
 
-pub(crate) fn build_stack_swap_op<'a, 'ctx>(
+pub(crate) fn build_stack_swap_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     idx: u64,
@@ -326,7 +330,7 @@ pub(crate) fn build_stack_swap_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_dup_op<'a, 'ctx>(
+pub(crate) fn build_dup_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
     idx: u64,

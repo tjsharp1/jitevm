@@ -7,9 +7,8 @@ use jitevm::{
     db::StateProviderDatabase,
     jit::{
         contract::JitContractBuilder, gas, ExecutionResult, JitEvmEngineError,
-        JitEvmExecutionContext, Success,
+        JitEvmExecutionContext, Success, TransactionConfig,
     },
-    spec::SpecId,
 };
 use reth::dirs::{DataDirPath, MaybePlatformPath};
 use reth_db::open_db_read_only;
@@ -17,6 +16,7 @@ use reth_interfaces::db::LogLevel;
 use reth_primitives::{ChainSpec, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
 use reth_provider::ProviderFactory;
 use revm::db::CacheDB;
+use revm_primitives::LatestSpec;
 use std::{path::PathBuf, sync::Arc};
 
 fn chainspec_parser(specname: &str) -> eyre::Result<Arc<ChainSpec>> {
@@ -62,10 +62,13 @@ fn main() -> eyre::Result<()> {
     let db = StateProviderDatabase::new(factory.latest()?);
     let cachedb = CacheDB::new(db);
 
-    let mut ctx = JitEvmExecutionContext::new_with_db(&cachedb);
-
     let address = Address::parse_checksummed(args.address, None)?;
-    ctx.transaction_context.set_contract_address(address);
+    let mut cfg = TransactionConfig::default();
+    cfg.transact_to = address;
+
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .with_transaction_config(cfg)
+        .build_with_db(&cachedb);
 
     let evm_code = load_evm_code(args.bytecode)?;
 
@@ -74,7 +77,7 @@ fn main() -> eyre::Result<()> {
         .expect("Could not build jit contract")
         .debug_ir("jit_test.ll")
         .debug_asm("jit_test.asm")
-        .build(evm_code.augment().index())
+        .build(LatestSpec, evm_code.augment().index())
         .unwrap();
 
     match contract.transact(&mut ctx) {

@@ -4,12 +4,13 @@ use crate::jit::ops::{
 use crate::jit::{
     contract::BuilderContext,
     cursor::CurrentInstruction,
-    gas::{build_memory_gas_check, memory_expansion_cost},
+    gas::{build_memory_gas_check, const_cost, memory_expansion_cost, memory_gas},
     JitEvmEngineError, EVM_JIT_STACK_ALIGN,
 };
 use inkwell::{values::BasicValue, AddressSpace};
+use revm_primitives::Spec;
 
-pub(crate) fn build_mstore_op<'a, 'ctx>(
+pub(crate) fn build_mstore_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -46,7 +47,7 @@ pub(crate) fn build_mstore_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_mstore8_op<'a, 'ctx>(
+pub(crate) fn build_mstore8_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
@@ -80,7 +81,7 @@ pub(crate) fn build_mstore8_op<'a, 'ctx>(
     Ok(())
 }
 
-pub(crate) fn build_mload_op<'a, 'ctx>(
+pub(crate) fn build_mload_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {

@@ -1,10 +1,10 @@
 use super::{expect_halt, expect_stack_underflow, expect_success, operations, test_jit};
 use crate::jit::{gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success};
-use crate::spec::SpecId;
 use alloy_primitives::U256;
 use paste::paste;
 use rand::Rng;
 use revm::db::InMemoryDB;
+use revm_primitives::LatestSpec;
 
 macro_rules! test_op1 {
     ($fname:ident, $evmop:expr, $opname:expr) => {
@@ -15,15 +15,14 @@ macro_rules! test_op1 {
 
                 fn _test(a: U256) {
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-                    let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
-                    let op_cost = gas.const_cost($evmop);
-                    let init_cost = gas.init_gas(&[]);
+                    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                    let op_cost = gas::const_cost::<LatestSpec>($evmop);
+                    let init_cost = gas::init_gas::<LatestSpec>(&[]);
                     let expected_gas = init_cost + push_cost + op_cost;
 
-                    let result = test_jit(vec![
+                    let result = test_jit(LatestSpec, vec![
                         Push(32, a),
                         $evmop,
                     ], &mut ctx).expect("Contract build failed");
@@ -62,15 +61,14 @@ macro_rules! test_op2 {
 
                 fn _test(a: U256, b: U256) {
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-                    let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
-                    let op_cost = gas.const_cost($evmop);
-                    let init_cost = gas.init_gas(&[]);
+                    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                    let op_cost = gas::const_cost::<LatestSpec>($evmop);
+                    let init_cost = gas::init_gas::<LatestSpec>(&[]);
                     let expected_gas = init_cost + push_cost * 2 + op_cost;
 
-                    let result = test_jit(vec![
+                    let result = test_jit(LatestSpec, vec![
                         Push(32, b),
                         Push(32, a),
                         $evmop,
@@ -114,15 +112,14 @@ macro_rules! test_op2_small {
 
                 fn _test(a: U256, b: U256) {
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-                    let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
-                    let op_cost = gas.const_cost($evmop);
-                    let init_cost = gas.init_gas(&[]);
+                    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                    let op_cost = gas::const_cost::<LatestSpec>($evmop);
+                    let init_cost = gas::init_gas::<LatestSpec>(&[]);
                     let expected_gas = init_cost + push_cost * 2 + op_cost;
 
-                    let result = test_jit(vec![
+                    let result = test_jit(LatestSpec, vec![
                         Push(32, b),
                         Push(32, a),
                         $evmop,
@@ -170,15 +167,14 @@ macro_rules! test_op3 {
 
                 fn _test(a: U256, b: U256, c: U256) {
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-                    let gas = gas::Gas::new(SpecId::LATEST);
-                    let push_cost = gas.const_cost(Push(32, U256::ZERO));
-                    let op_cost = gas.const_cost($evmop);
-                    let init_cost = gas.init_gas(&[]);
+                    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                    let op_cost = gas::const_cost::<LatestSpec>($evmop);
+                    let init_cost = gas::init_gas::<LatestSpec>(&[]);
                     let expected_gas = init_cost + push_cost * 3 + op_cost;
 
-                    let result = test_jit(vec![
+                    let result = test_jit(LatestSpec, vec![
                         Push(32, c),
                         Push(32, b),
                         Push(32, a),
@@ -225,10 +221,9 @@ macro_rules! test_op3 {
 fn operations_underflow_exp() {
     use crate::code::EvmOp::*;
 
-    let gas = gas::Gas::new(SpecId::LATEST);
-    let push_gas = gas.const_cost(Push(32, U256::ZERO));
-    let init_cost = gas.init_gas(&[]);
-    let (base, exp) = gas.exp_cost();
+    let push_gas = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+    let (base, exp) = gas::exp_cost::<LatestSpec>();
 
     let mut ops = Vec::new();
 
@@ -239,8 +234,8 @@ fn operations_underflow_exp() {
         let expected_gas = init_cost + push_gas * i;
 
         let db = InMemoryDB::default();
-        let mut ctx = JitEvmExecutionContext::new_with_db(&db);
-        let result = test_jit(cloned, &mut ctx).expect("Contract build failed");
+        let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+        let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
         expect_halt!(
             operations_underflow_exp,
@@ -256,8 +251,8 @@ fn operations_underflow_exp() {
     let expected_gas = init_cost + push_gas * 2 + base + exp;
 
     let db = InMemoryDB::default();
-    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
-    let result = test_jit(ops, &mut ctx).expect("Contract build failed");
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
 
     expect_success!(
         operations_underflow_exp,
@@ -273,19 +268,22 @@ fn operations_jit_equivalence_exp() {
 
     fn _test(a: U256, b: U256) {
         let db = InMemoryDB::default();
-        let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+        let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-        let gas = gas::Gas::new(SpecId::LATEST);
-        let push_cost = gas.const_cost(Push(32, U256::ZERO));
-        let (base, exp) = gas.exp_cost();
-        let init_cost = gas.init_gas(&[]);
+        let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+        let (base, exp) = gas::exp_cost::<LatestSpec>();
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
         let zeros = (256 - b.leading_zeros()) as u64;
         let bytes = (zeros / 8) + if zeros % 8 == 0 { 0 } else { 1 };
         let expected_gas = init_cost + push_cost * 2 + base + exp * bytes;
 
-        let result = test_jit(vec![Push(32, b), Push(32, a), EvmOp::Exp], &mut ctx)
-            .expect("Contract build failed");
+        let result = test_jit(
+            LatestSpec,
+            vec![Push(32, b), Push(32, a), EvmOp::Exp],
+            &mut ctx,
+        )
+        .expect("Contract build failed");
 
         expect_success!(equivalence_exp, result, Success::Stop, expected_gas);
 

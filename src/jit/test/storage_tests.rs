@@ -1,11 +1,10 @@
 use super::{expect_halt, expect_stack_underflow, expect_success, test_jit};
 use crate::jit::{gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success};
-use crate::spec::SpecId;
 use alloy_primitives::{Address, U256};
 use paste::paste;
 use rand::Rng;
 use revm::db::InMemoryDB;
-use revm_primitives::StorageSlot;
+use revm_primitives::LatestSpec;
 use std::collections::{HashMap, HashSet};
 
 #[test]
@@ -31,8 +30,9 @@ fn operations_jit_test_sstore() {
         }
 
         let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
-        let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+        let result =
+            test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
         // TODO: need to do storage hot/cold tracking for the gas accounting.
         let expected_gas = 0;
         expect_success!(test_sstore, result, Success::Stop, expected_gas);
@@ -62,8 +62,7 @@ fn operations_jit_test_sload() {
         let mut ops = Vec::new();
         let mut expected_values = Vec::new();
 
-        let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+        let mut db = InMemoryDB::default();
 
         for _ in 0..20 {
             let a = rand::thread_rng().gen::<[u8; 32]>();
@@ -73,13 +72,8 @@ fn operations_jit_test_sload() {
             let key = U256::from_be_bytes(b);
 
             expected_values.push(value);
-            execution_context
-                .evm_state
-                .state
-                .entry(Address::ZERO)
-                .or_default()
-                .storage
-                .insert(key, StorageSlot::new(value));
+            db.insert_account_storage(Address::ZERO, key, value)
+                .expect("Insert storage error");
 
             ops.push(EvmOp::Push(32, key));
         }
@@ -89,7 +83,9 @@ fn operations_jit_test_sload() {
             ops.push(EvmOp::Mstore);
         }
 
-        let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+        let result =
+            test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
         // TODO: need to do storage hot/cold tracking for the gas accounting.
         let expected_gas = 0;
         expect_success!(test_sload, result, Success::Stop, expected_gas);

@@ -4,12 +4,11 @@ use crate::{
         contract::JitContractBuilder, gas, ExecutionResult, Halt, JitEvmEngineError,
         JitEvmExecutionContext, Success,
     },
-    spec::SpecId,
 };
 use alloy_primitives::{Address, U256};
-use paste::paste;
 use rand::{Rng, RngCore};
 use revm::db::InMemoryDB;
+use revm_primitives::{LatestSpec, Spec};
 use sha3::{Digest, Keccak256};
 use std::{
     collections::{HashMap, HashSet},
@@ -26,9 +25,10 @@ mod memory_tests;
 mod stack_tests;
 mod storage_tests;
 
-fn test_jit(
+fn test_jit<SPEC: Spec>(
+    spec: SPEC,
     ops: Vec<EvmOp>,
-    execution_context: &mut JitEvmExecutionContext,
+    ctx: &mut JitEvmExecutionContext<SPEC>,
 ) -> Result<ExecutionResult, JitEvmEngineError> {
     use crate::code::EvmCode;
     use inkwell::context::Context;
@@ -38,10 +38,8 @@ fn test_jit(
         .expect("Could not build jit contract")
         .debug_ir("jit_test.ll")
         .debug_asm("jit_test.asm")
-        .build(EvmCode { ops: ops.clone() }.augment().index())?;
-    Ok(contract
-        .transact(execution_context)
-        .expect("Contract call failed"))
+        .build(spec, EvmCode { ops: ops.clone() }.augment().index())?;
+    Ok(contract.transact(ctx).expect("Contract call failed"))
 }
 
 macro_rules! expect_success {
@@ -109,10 +107,9 @@ macro_rules! expect_stack_overflow {
             fn [<operations_stack_overflow_ $fname>]() {
                 use crate::code::EvmOp::*;
 
-                let gas = gas::Gas::new(SpecId::LATEST);
-                let init_cost = gas.init_gas(&[]);
-                let push_gas = gas.const_cost(Push(32, U256::ZERO));
-                let op_cost = gas.const_cost($evmop);
+                let init_cost = gas::init_gas::<LatestSpec>(&[]);
+                let push_gas = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                let op_cost = gas::const_cost::<LatestSpec>($evmop);
 
                 let mut ops = vec![Push(32, U256::ZERO); EVM_STACK_SIZE];
 
@@ -120,9 +117,9 @@ macro_rules! expect_stack_overflow {
                     ops.push($evmop);
 
                     let db = InMemoryDB::default();
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-                    let result = test_jit(ops.clone(), &mut ctx).expect("Contract build failed");
+                    let result = test_jit(LatestSpec, ops.clone(), &mut ctx).expect("Contract build failed");
 
                     let pushes = (EVM_STACK_SIZE - i) as u64;
                     let expected_gas = init_cost + pushes * push_gas + op_cost;
@@ -138,8 +135,8 @@ macro_rules! expect_stack_overflow {
                 let expected_gas = init_cost + pushes * push_gas + op_cost;
 
                 let db = InMemoryDB::default();
-                let mut ctx = JitEvmExecutionContext::new_with_db(&db);
-                let result = test_jit(ops, &mut ctx).expect("Contract build failed");
+                let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+                let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
 
                 expect_success!($fname, result, Success::Stop, expected_gas);
             }
@@ -154,11 +151,10 @@ macro_rules! expect_stack_underflow {
             fn [<operations_stack_underflow_ $fname>]() {
                 use crate::code::EvmOp::*;
 
-                let gas = gas::Gas::new(SpecId::LATEST);
-                let push_gas = gas.const_cost(Push(32, U256::ZERO));
-                let init_cost = gas.init_gas(&[]);
+                let push_gas = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+                let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
-                let op_cost = gas.const_cost($evmop);
+                let op_cost = gas::const_cost::<LatestSpec>($evmop);
 
                 let mut ops = Vec::new();
 
@@ -170,8 +166,8 @@ macro_rules! expect_stack_underflow {
 
                     let db = InMemoryDB::default();
 
-                    let mut ctx = JitEvmExecutionContext::new_with_db(&db);
-                    let result = test_jit(cloned, &mut ctx).expect("Contract build failed");
+                    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+                    let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
                     expect_halt!($fname, result, Halt::StackUnderflow, expected_gas);
 
@@ -182,8 +178,8 @@ macro_rules! expect_stack_underflow {
                 let expected_gas = init_cost + push_gas * $min_stack + op_cost;
 
                 let db = InMemoryDB::default();
-                let mut ctx = JitEvmExecutionContext::new_with_db(&db);
-                let result = test_jit(ops, &mut ctx).expect("Contract build failed");
+                let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+                let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
 
                 expect_success!($fname, result, Success::Stop, expected_gas);
             }
@@ -200,7 +196,7 @@ pub(crate) use expect_success;
 fn operations_jit_test_stop() {
     for _ in 0..1000 {
         let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
         let mut expected_mem = vec![0u8; 64];
         let mut ops = Vec::new();
@@ -223,13 +219,13 @@ fn operations_jit_test_stop() {
         ops.push(EvmOp::Push(32, U256::ZERO));
         ops.push(EvmOp::Mstore);
 
-        let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
+        let result =
+            test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
 
-        let gas = gas::Gas::new(SpecId::LATEST);
-        let push_gas = gas.const_cost(EvmOp::Push(32, U256::ZERO));
-        let const_cost = gas.const_cost(EvmOp::Mstore);
-        let mem_cost = gas.memory_gas();
-        let init_cost = gas.init_gas(&[]);
+        let push_gas = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+        let mem_cost = gas::memory_gas::<LatestSpec>();
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
         let offset = 64u64;
         let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
@@ -249,17 +245,42 @@ fn operations_jit_test_stop() {
 
 #[test]
 fn operations_jit_test_sha3() {
+    use revm_primitives::KECCAK_EMPTY;
+
     for _ in 0..1000 {
         let db = InMemoryDB::default();
-        let mut execution_context = JitEvmExecutionContext::new_with_db(&db);
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
-        let mut expected_store = HashMap::new();
+        let mut ops = Vec::new();
+
+        ops.push(EvmOp::Push(32, U256::ZERO));
+        ops.push(EvmOp::Push(32, U256::from(1)));
+        ops.push(EvmOp::Sha3);
+
+        let result =
+            test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
+        let JitEvmExecutionContext { stack, .. } = execution_context;
+        assert_eq!(stack[0], KECCAK_EMPTY.into());
+
+        let push_gas = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
+        let (static_gas, dynamic_gas) = gas::sha3_gas::<LatestSpec>();
+
+        let expected_gas = init_cost + push_gas * 2 + static_gas;
+
+        expect_success!(test_sha3_zero, result, Success::Stop, expected_gas);
+
         let mut ops = Vec::new();
 
         let mut offset = 0;
         let mem_range = 0..512;
         let mut a = vec![0u8; 512];
+        let mut expected_store = HashMap::new();
 
+        let db = InMemoryDB::default();
+        let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+
+        let mut dynamic_sha3_cost = 0;
         for i in 0..20 {
             rand::thread_rng().fill_bytes(&mut a);
             let r = rand::thread_rng().gen_range(mem_range.clone());
@@ -270,6 +291,9 @@ fn operations_jit_test_sha3() {
             let value = U256::from_be_bytes(Keccak256::digest(&a[..r]).into());
             expected_store.insert(U256::from(i), value);
 
+            let words = (r + 31) / 32;
+            dynamic_sha3_cost += dynamic_gas * words as u64;
+
             ops.push(EvmOp::Push(32, U256::from(r)));
             ops.push(EvmOp::Push(32, U256::from(offset)));
             ops.push(EvmOp::Sha3);
@@ -279,9 +303,22 @@ fn operations_jit_test_sha3() {
             offset += r;
         }
 
-        let result = test_jit(ops, &mut execution_context).expect("Contract build failed");
-        // TODO: need to do sha3 gas accounting.
-        let expected_gas = 0;
+        let result =
+            test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
+
+        let mem_cost = gas::memory_gas::<LatestSpec>();
+
+        let offset = offset as u64;
+        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
+        let size = up.checked_add(offset).expect("Overflow on add");
+        let size_words = size / 32;
+
+        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+
+        let cold_storage_gas = 22100;
+
+        let expected_gas =
+            init_cost + push_gas * 40 + mem_gas + 20 * cold_storage_gas + dynamic_sha3_cost;
         expect_success!(test_sha3, result, Success::Stop, expected_gas);
 
         let mut state = execution_context.final_state();
@@ -303,7 +340,56 @@ fn operations_jit_test_sha3() {
         }
     }
 }
-expect_stack_underflow!(sha3, EvmOp::Sha3, 2);
+
+#[test]
+fn operations_stack_underflow_sha3() {
+    use crate::code::EvmOp::*;
+
+    let push_gas = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+
+    let mut ops = Vec::new();
+
+    for i in 0..2 {
+        let mut cloned = ops.clone();
+        cloned.push(Sha3);
+
+        let expected_gas = init_cost + push_gas * i;
+
+        let db = InMemoryDB::default();
+
+        let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+        let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
+
+        expect_halt!(
+            stack_underflow_sha3,
+            result,
+            Halt::StackUnderflow,
+            expected_gas
+        );
+
+        ops.push(Push(32, U256::from(i)));
+    }
+    ops.push(Sha3);
+
+    let offset = 0u64;
+    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
+    let size = up.checked_add(offset).expect("Overflow on add");
+    let size_words = size / 32;
+
+    let mem_cost = gas::memory_gas::<LatestSpec>();
+    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+
+    let (static_gas, dynamic_gas) = gas::sha3_gas::<LatestSpec>();
+    let op_cost = static_gas + dynamic_gas * size_words + mem_gas;
+    let expected_gas = init_cost + push_gas * 2 + op_cost;
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_success!(stack_underflow_sha3, result, Success::Stop, expected_gas);
+}
 
 // TODO: remaining instructions
 //Address,
