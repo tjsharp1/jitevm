@@ -82,12 +82,9 @@ impl TransactionContext {
 }
 
 impl<'ctx> TransactionContext {
-    pub fn llvm_struct_type(ctx: &'ctx Context, target_data: &TargetData) -> StructType<'ctx> {
+    pub fn llvm_struct_type(ctx: &'ctx Context, _: &TargetData) -> StructType<'ctx> {
         let u256_type = ctx.custom_width_int_type(256);
         let i64_type = ctx.i64_type();
-        let ptr_type = ctx
-            .ptr_sized_int_type(target_data, None)
-            .ptr_type(AddressSpace::default());
 
         let fields = vec![
             u256_type.into(), // caller

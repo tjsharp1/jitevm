@@ -7,6 +7,130 @@ const ZERO_DATA_COST: u64 = 4;
 const NONZERO_DATA_COST: u64 = 16;
 const INIT_TX_COST: u64 = 21000;
 
+macro_rules! build_sstore_gas_check {
+    ($ctx:ident, $current:ident, $book:ident, $gas_cost:ident, $refund:ident) => {
+        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use inkwell::{intrinsics::Intrinsic, IntPredicate};
+
+        let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
+        let expect_fn = expect
+            .get_declaration(
+                &$ctx.module,
+                &[$ctx.types.type_bool.into(), $ctx.types.type_bool.into()],
+            )
+            .expect("Expect intrinsic declaration not found!");
+        let const_true = $ctx.types.type_bool.const_int(1, false);
+
+        let gas_cost = $ctx
+            .builder
+            .build_int_cast($gas_cost, $ctx.types.type_i64, "")?;
+        // TODO: this OR gas_remaining < 2300 (istanbul fork)
+        let cmp =
+            $ctx.builder
+                .build_int_compare(IntPredicate::UGE, $book.gas_remaining, gas_cost, "")?;
+        let cmp = $ctx
+            .builder
+            .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
+            .try_as_basic_value()
+            .left()
+            .ok_or(JitEvmEngineError::NoInstructionValue)?
+            .into_int_value();
+
+        let sub_gas = $ctx
+            .builder
+            .build_select(cmp, gas_cost, $book.gas_remaining, "")?
+            .into_int_value();
+        let remaining = $ctx
+            .builder
+            .build_int_sub($book.gas_remaining, sub_gas, "deduct_gas")?;
+
+        let refund = $ctx
+            .builder
+            .build_int_cast($refund, $ctx.types.type_i64, "")?;
+        let refund = $ctx
+            .builder
+            .build_int_add($book.gas_refund, refund, "add_refund_amount")?;
+
+        let book = $book.update_refund(refund);
+        let book = book.update_gas(remaining);
+
+        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let next_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
+
+        next_block.add_incoming(&book, $current.block());
+
+        let oog = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
+        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
+        $current.incoming_error(&book, $current.block(), result_code);
+
+        $ctx.builder.position_at_end($current.block().block);
+        $ctx.builder
+            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+        $ctx.builder.position_at_end(next_block.block);
+
+        $current.update_current_block(next_block);
+    };
+}
+
+macro_rules! build_sload_gas_check {
+    ($ctx:ident, $current:ident, $book:ident, $gas_cost:ident) => {
+        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use inkwell::{intrinsics::Intrinsic, IntPredicate};
+
+        let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
+        let expect_fn = expect
+            .get_declaration(
+                &$ctx.module,
+                &[$ctx.types.type_bool.into(), $ctx.types.type_bool.into()],
+            )
+            .expect("Expect intrinsic declaration not found!");
+        let const_true = $ctx.types.type_bool.const_int(1, false);
+
+        let cmp = $ctx.builder.build_int_compare(
+            IntPredicate::UGE,
+            $book.gas_remaining,
+            $gas_cost,
+            "",
+        )?;
+        let cmp = $ctx
+            .builder
+            .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
+            .try_as_basic_value()
+            .left()
+            .ok_or(JitEvmEngineError::NoInstructionValue)?
+            .into_int_value();
+
+        let sub_gas = $ctx
+            .builder
+            .build_select(cmp, $gas_cost, $book.gas_remaining, "")?
+            .into_int_value();
+        let remaining = $ctx
+            .builder
+            .build_int_sub($book.gas_remaining, sub_gas, "deduct_gas")?;
+        let book = $book.update_gas(remaining);
+
+        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let next_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
+
+        next_block.add_incoming(&book, $current.block());
+
+        let oog = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
+        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
+        $current.incoming_error(&book, $current.block(), result_code);
+
+        $ctx.builder.position_at_end($current.block().block);
+        $ctx.builder
+            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+        $ctx.builder.position_at_end(next_block.block);
+
+        $current.update_current_block(next_block);
+    };
+}
+
 macro_rules! build_sha3_gas_check {
     ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {
         use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
@@ -378,9 +502,62 @@ pub fn sload_gas<SPEC: Spec>(warm: bool) -> u64 {
     }
 }
 
-pub fn sstore_gas<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> (u64, u64) {
+pub fn sstore_gas<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> (u64, i64) {
+    let cost = sstore_cost::<SPEC>(original, current, new, warm);
+    let refund = sstore_refund::<SPEC>(original, current, new, warm);
+    (cost, refund)
+}
+
+fn sstore_cost<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> u64 {
     if SPEC::enabled(SpecId::LATEST) {
-        todo!("SSTORE stuff")
+        let warm_cold = if warm { 100 } else { 2100 };
+
+        if new == current {
+            100
+        } else if current == original {
+            let gas = if original == U256::ZERO { 20000 } else { 2900 };
+            gas + warm_cold
+        } else {
+            100 + warm_cold
+        }
+    } else {
+        unimplemented!("Only LATEST implemented currently!");
+    }
+}
+
+fn sstore_refund<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> i64 {
+    if SPEC::enabled(SpecId::LATEST) {
+        if current == new {
+            0
+        } else {
+            if current == original {
+                if original == U256::ZERO && new == U256::ZERO {
+                    4800
+                } else {
+                    0
+                }
+            } else {
+                let mut refund = 0i64;
+
+                if original != U256::ZERO {
+                    if current == U256::ZERO {
+                        refund -= 4800;
+                    } else if new == U256::ZERO {
+                        refund += 4800;
+                    }
+                }
+
+                if new == original {
+                    if original == U256::ZERO {
+                        refund += 19900;
+                    } else {
+                        refund += if warm { 2800 } else { 4900 };
+                    }
+                }
+
+                refund
+            }
+        }
     } else {
         unimplemented!("Only LATEST implemented currently!");
     }
@@ -502,4 +679,6 @@ pub(crate) use build_gas_check;
 pub(crate) use build_gas_check_exp;
 pub(crate) use build_memory_gas_check;
 pub(crate) use build_sha3_gas_check;
+pub(crate) use build_sload_gas_check;
+pub(crate) use build_sstore_gas_check;
 pub(crate) use memory_expansion_cost;

@@ -1,7 +1,6 @@
-use super::{expect_halt, expect_stack_underflow, expect_success, test_jit};
+use super::{expect_halt, expect_success, memory_gas_calc, test_jit};
 use crate::jit::{gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success};
 use alloy_primitives::{Address, U256};
-use paste::paste;
 use rand::Rng;
 use revm::db::InMemoryDB;
 use revm_primitives::LatestSpec;
@@ -33,8 +32,13 @@ fn operations_jit_test_sstore() {
         let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result =
             test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
-        // TODO: need to do storage hot/cold tracking for the gas accounting.
-        let expected_gas = 0;
+
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let (sstore_cost, refund) =
+            gas::sstore_gas::<LatestSpec>(U256::ZERO, U256::ZERO, U256::from(1), false);
+
+        let expected_gas = init_cost + push_cost * 40 + sstore_cost * 20;
         expect_success!(test_sstore, result, Success::Stop, expected_gas);
 
         let mut state = execution_context.final_state();
@@ -54,7 +58,49 @@ fn operations_jit_test_sstore() {
         }
     }
 }
-expect_stack_underflow!(sstore, EvmOp::Sstore, 2);
+
+#[test]
+fn operations_stack_underflow_sstore() {
+    use crate::code::EvmOp::*;
+
+    let push_gas = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+
+    let mut ops = Vec::new();
+
+    for i in 0..2 {
+        let mut cloned = ops.clone();
+        cloned.push(EvmOp::Sstore);
+
+        let expected_gas = init_cost + push_gas * i;
+
+        let db = InMemoryDB::default();
+
+        let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+        let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
+
+        expect_halt!(
+            stack_underflow_sstore,
+            result,
+            Halt::StackUnderflow,
+            expected_gas
+        );
+
+        ops.push(Push(32, U256::from(i)));
+    }
+    ops.push(EvmOp::Sstore);
+
+    let (sstore_cost, refund) =
+        gas::sstore_gas::<LatestSpec>(U256::ZERO, U256::ZERO, U256::ZERO, false);
+
+    let expected_gas = init_cost + push_gas * 2 + sstore_cost;
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_success!(stack_underflow_sstore, result, Success::Stop, expected_gas);
+}
 
 #[test]
 fn operations_jit_test_sload() {
@@ -86,8 +132,16 @@ fn operations_jit_test_sload() {
         let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result =
             test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
-        // TODO: need to do storage hot/cold tracking for the gas accounting.
-        let expected_gas = 0;
+
+        let init_cost = gas::init_gas::<LatestSpec>(&[]);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+        let sload_cost = gas::sload_gas::<LatestSpec>(false);
+        let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+
+        let mem_gas = memory_gas_calc::<LatestSpec>(0x20 * 20u64);
+
+        let expected_gas = init_cost + push_cost * 40 + sload_cost * 20 + mem_gas + const_cost * 20;
+
         expect_success!(test_sload, result, Success::Stop, expected_gas);
 
         let JitEvmExecutionContext { memory, .. } = execution_context;
@@ -103,4 +157,45 @@ fn operations_jit_test_sload() {
         }
     }
 }
-expect_stack_underflow!(sload, EvmOp::Sload, 1);
+
+#[test]
+fn operations_stack_underflow_sload() {
+    use crate::code::EvmOp::*;
+
+    let push_gas = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+
+    let mut ops = Vec::new();
+
+    for i in 0..1 {
+        let mut cloned = ops.clone();
+        cloned.push(EvmOp::Sload);
+
+        let expected_gas = init_cost + push_gas * i;
+
+        let db = InMemoryDB::default();
+
+        let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+        let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
+
+        expect_halt!(
+            stack_underflow_sload,
+            result,
+            Halt::StackUnderflow,
+            expected_gas
+        );
+
+        ops.push(Push(32, U256::from(i)));
+    }
+    ops.push(EvmOp::Sload);
+
+    let sload_cost = gas::sload_gas::<LatestSpec>(false);
+
+    let expected_gas = init_cost + push_gas + sload_cost;
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_success!(stack_underflow_sload, result, Success::Stop, expected_gas);
+}

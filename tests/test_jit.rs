@@ -70,11 +70,15 @@ macro_rules! assert_evm_jit_equivalence {
         println!("TJDEBUG evmresult {:#?}", result);
         match result {
             REVMExecutionResult::Success {
-                reason, gas_used, ..
+                reason,
+                gas_used,
+                gas_refunded,
+                ..
             } => {
                 let ExecutionResult::Success {
                     reason: jit_reason,
                     gas_used: jit_gas,
+                    gas_refunded: jit_refund,
                 } = jit_result
                 else {
                     panic!("JIT did not return success when it should have!");
@@ -87,6 +91,10 @@ macro_rules! assert_evm_jit_equivalence {
                 }
 
                 assert_eq!(gas_used, jit_gas, "EVM and JIT gas not equivalent");
+                assert_eq!(
+                    gas_refunded, jit_refund,
+                    "EVM and JIT refund not equivalent"
+                );
             }
             _ => unimplemented!("Not implemented for error results!"),
         }

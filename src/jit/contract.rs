@@ -30,6 +30,7 @@ pub struct JitEvmEngineBookkeeping<'ctx> {
     pub sp_min: IntValue<'ctx>,
     pub sp_max: IntValue<'ctx>,
     pub gas_remaining: IntValue<'ctx>,
+    pub gas_refund: IntValue<'ctx>,
     pub sp: IntValue<'ctx>,
     pub mem: IntValue<'ctx>,
     pub mem_size: IntValue<'ctx>,
@@ -55,6 +56,13 @@ impl<'ctx> JitEvmEngineBookkeeping<'ctx> {
             ..*self
         }
     }
+
+    pub fn update_refund(&self, gas_refund: IntValue<'ctx>) -> Self {
+        Self {
+            gas_refund,
+            ..*self
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -64,6 +72,7 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
     pub phi_sp_min: PhiValue<'ctx>,
     pub phi_sp_max: PhiValue<'ctx>,
     pub phi_gas_remaining: PhiValue<'ctx>,
+    pub phi_gas_refund: PhiValue<'ctx>,
     pub phi_sp: PhiValue<'ctx>,
     pub phi_mem: PhiValue<'ctx>,
     pub phi_mem_size: PhiValue<'ctx>,
@@ -92,6 +101,9 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         let phi_gas_remaining = ctx
             .builder
             .build_phi(ctx.types.type_i64, &format!("gas_remaining{}", suffix))?;
+        let phi_gas_refund = ctx
+            .builder
+            .build_phi(ctx.types.type_i64, &format!("gas_refund{}", suffix))?;
         let phi_sp = ctx
             .builder
             .build_phi(ctx.types.type_i64, &format!("sp{}", suffix))?;
@@ -111,6 +123,7 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             phi_sp_min,
             phi_sp_max,
             phi_gas_remaining,
+            phi_gas_refund,
             phi_sp,
             phi_mem,
             phi_mem_size,
@@ -141,6 +154,7 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             sp_min: self.phi_sp_min.as_basic_value().into_int_value(),
             sp_max: self.phi_sp_max.as_basic_value().into_int_value(),
             gas_remaining: self.phi_gas_remaining.as_basic_value().into_int_value(),
+            gas_refund: self.phi_gas_refund.as_basic_value().into_int_value(),
             sp: self.phi_sp.as_basic_value().into_int_value(),
             mem: self.phi_mem.as_basic_value().into_int_value(),
             mem_size: self.phi_mem_size.as_basic_value().into_int_value(),
@@ -155,6 +169,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         self.phi_sp_max.add_incoming(&[(&book.sp_max, *prev)]);
         self.phi_gas_remaining
             .add_incoming(&[(&book.gas_remaining, *prev)]);
+        self.phi_gas_refund
+            .add_incoming(&[(&book.gas_refund, *prev)]);
         self.phi_sp.add_incoming(&[(&book.sp, *prev)]);
         self.phi_mem.add_incoming(&[(&book.mem, *prev)]);
         self.phi_mem_size.add_incoming(&[(&book.mem_size, *prev)]);
@@ -172,6 +188,8 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
         self.phi_sp_max.add_incoming(&[(&book.sp_max, prev.block)]);
         self.phi_gas_remaining
             .add_incoming(&[(&book.gas_remaining, prev.block)]);
+        self.phi_gas_refund
+            .add_incoming(&[(&book.gas_refund, prev.block)]);
         self.phi_sp.add_incoming(&[(&book.sp, prev.block)]);
         self.phi_mem.add_incoming(&[(&book.mem, prev.block)]);
         self.phi_mem_size

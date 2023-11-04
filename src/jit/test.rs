@@ -42,12 +42,28 @@ fn test_jit<SPEC: Spec>(
     Ok(contract.transact(ctx).expect("Contract call failed"))
 }
 
+fn memory_gas_calc<SPEC: Spec>(offset: u64) -> u64 {
+    let mem_cost = gas::memory_gas::<SPEC>();
+    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
+    let size = up.checked_add(offset).expect("Overflow on add");
+    let size_words = size / 32;
+    (size_words * size_words) / 512 + mem_cost * size_words
+}
+
 macro_rules! expect_success {
     ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {
+        let refund = 0;
+        expect_success!($fname, $result, $reason, $gas, refund);
+    };
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident, $refund:ident) => {
         let name_str = stringify!($fname);
 
         match $result {
-            ExecutionResult::Success { reason, gas_used } => {
+            ExecutionResult::Success {
+                reason,
+                gas_used,
+                gas_refunded,
+            } => {
                 assert_eq!(
                     reason, $reason,
                     "expect_success - {}: expected {:?}, got {:?}",
@@ -56,6 +72,11 @@ macro_rules! expect_success {
                 assert_eq!(
                     gas_used, $gas,
                     "expect_success - {}: incorrect gas usage.",
+                    name_str
+                );
+                assert_eq!(
+                    gas_refunded, $refund as u64,
+                    "expect_success - {}: incorrect gas refund.",
                     name_str
                 );
             }
@@ -224,15 +245,10 @@ fn operations_jit_test_stop() {
 
         let push_gas = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
         let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
-        let mem_cost = gas::memory_gas::<LatestSpec>();
         let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
-        let offset = 64u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
+        let mem_gas = memory_gas_calc::<LatestSpec>(64);
 
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
         let expected_gas = init_cost + push_gas * 4 + mem_gas + const_cost * 2;
 
         expect_success!(test_stop, result, Success::Stop, expected_gas);
@@ -306,20 +322,17 @@ fn operations_jit_test_sha3() {
         let result =
             test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
 
-        let mem_cost = gas::memory_gas::<LatestSpec>();
+        let (store_cost, refund) =
+            gas::sstore_gas::<LatestSpec>(U256::ZERO, U256::ZERO, U256::from(1), false);
+        let mem_gas = memory_gas_calc::<LatestSpec>(offset as u64);
 
-        let offset = offset as u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
-
-        let cold_storage_gas = 22100;
-
-        let expected_gas =
-            init_cost + push_gas * 40 + mem_gas + 20 * cold_storage_gas + dynamic_sha3_cost;
-        expect_success!(test_sha3, result, Success::Stop, expected_gas);
+        let expected_gas = init_cost
+            + push_gas * 60
+            + mem_gas
+            + 20 * store_cost
+            + dynamic_sha3_cost
+            + 20 * static_gas;
+        expect_success!(test_sha3, result, Success::Stop, expected_gas, refund);
 
         let mut state = execution_context.final_state();
         let account = state.remove(&Address::ZERO);
@@ -372,14 +385,9 @@ fn operations_stack_underflow_sha3() {
     }
     ops.push(Sha3);
 
-    let offset = 0u64;
-    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-    let size = up.checked_add(offset).expect("Overflow on add");
-    let size_words = size / 32;
+    let mem_gas = memory_gas_calc::<LatestSpec>(0);
 
-    let mem_cost = gas::memory_gas::<LatestSpec>();
-    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
-
+    let size_words = 0;
     let (static_gas, dynamic_gas) = gas::sha3_gas::<LatestSpec>();
     let op_cost = static_gas + dynamic_gas * size_words + mem_gas;
     let expected_gas = init_cost + push_gas * 2 + op_cost;

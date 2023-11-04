@@ -1,4 +1,4 @@
-use super::{expect_halt, expect_success, test_jit};
+use super::{expect_halt, expect_success, memory_gas_calc, test_jit};
 use crate::{
     code::EvmOp,
     jit::{gas, ExecutionResult, Halt, JitEvmEngineError, JitEvmExecutionContext, Success},
@@ -7,7 +7,6 @@ use alloy_primitives::U256;
 use rand::{prelude::SliceRandom, Rng};
 use revm::InMemoryDB;
 use revm_primitives::LatestSpec;
-use std::ops::{BitAnd, Not};
 
 #[test]
 fn operations_test_jump() {
@@ -70,14 +69,8 @@ fn operations_test_jump() {
         let mload_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
         let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
 
-        let mem_cost = gas::memory_gas::<LatestSpec>();
+        let mem_gas = memory_gas_calc::<LatestSpec>(0x80);
 
-        let offset = 0x80u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
         let expected_gas = init_cost
             + jump_cost
             + jumpdest_cost
@@ -187,20 +180,13 @@ fn operations_test_jumpi() {
         let mload_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
         let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
 
-        let mem_cost = gas::memory_gas::<LatestSpec>();
-
-        let offset = 0x80u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
         let jumpdest = if *condition == U256::ZERO {
             0
         } else {
             jumpdest_cost
         };
 
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+        let mem_gas = memory_gas_calc::<LatestSpec>(0x80);
 
         let expected_gas = init_cost
             + 6 * push_cost
@@ -245,14 +231,7 @@ fn test_jumpi_underflow() {
     ];
     let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
 
-    let mem_cost = gas::memory_gas::<LatestSpec>();
-
-    let offset = 0x20u64;
-    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-    let size = up.checked_add(offset).expect("Overflow on add");
-    let size_words = size / 32;
-
-    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+    let mem_gas = memory_gas_calc::<LatestSpec>(0x20);
     let expected_gas = init_cost + push_cost + mload_cost + jumpi_cost + mem_gas;
 
     expect_halt!(jumpi_underflow2, result, Halt::StackUnderflow, expected_gas);
@@ -314,14 +293,7 @@ fn operations_test_augmented_jump() {
     let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
     let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
 
-    let mem_cost = gas::memory_gas::<LatestSpec>();
-
-    let offset = 0x40u64;
-    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-    let size = up.checked_add(offset).expect("Overflow on add");
-    let size_words = size / 32;
-
-    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+    let mem_gas = memory_gas_calc::<LatestSpec>(0x40);
     let expected_gas =
         init_cost + jump_cost + push_cost * 5 + 2 * mstore_cost + jumpdest_cost + mem_gas;
 
@@ -411,20 +383,13 @@ fn operations_test_augmented_jumpi() {
         let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
         let mstore_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
 
-        let mem_cost = gas::memory_gas::<LatestSpec>();
-
-        let offset = 0x40u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
         let jumpdest = if *condition == U256::ZERO {
             0
         } else {
             jumpdest_cost
         };
 
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+        let mem_gas = memory_gas_calc::<LatestSpec>(0x40);
 
         let expected_gas =
             init_cost + 6 * push_cost + jumpi_cost + 2 * mstore_cost + jumpdest + mem_gas;

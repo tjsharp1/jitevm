@@ -3,7 +3,10 @@ use crate::jit::{
     contract::BuilderContext,
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
-    gas::{build_sha3_gas_check, memory_expansion_cost, memory_gas, sha3_gas},
+    gas::{
+        build_sha3_gas_check, build_sload_gas_check, build_sstore_gas_check, memory_expansion_cost,
+        memory_gas, sha3_gas,
+    },
     ops::{build_stack_check, build_stack_inc, build_stack_pop},
     types::JitTypes,
 };
@@ -164,7 +167,7 @@ impl<'ctx> HostFunctions<'ctx> {
         build_stack_check!(ctx, current, 1, 0);
 
         let book = current.book();
-        let _retval = ctx
+        let gas = ctx
             .builder
             .build_call(
                 self.callback_sload_func,
@@ -176,6 +179,9 @@ impl<'ctx> HostFunctions<'ctx> {
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
 
+        build_sload_gas_check!(ctx, current, book, gas);
+
+        let book = current.book();
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
         current.next().add_incoming(&book, current.block());
@@ -188,10 +194,9 @@ impl<'ctx> HostFunctions<'ctx> {
         current: &mut CurrentInstruction<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 2, 0);
-        // TODO: check if gas < 2300 (Istanbul fork)
 
         let book = current.book();
-        let _retval = ctx
+        let _ = ctx
             .builder
             .build_call(
                 self.callback_sstore_func,
@@ -202,8 +207,13 @@ impl<'ctx> HostFunctions<'ctx> {
             .left()
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
-        let (book, _) = build_stack_pop!(ctx, book);
-        let (book, _) = build_stack_pop!(ctx, book);
+
+        let (book, gas) = build_stack_pop!(ctx, book);
+        let (book, refund) = build_stack_pop!(ctx, book);
+
+        build_sstore_gas_check!(ctx, current, book, gas, refund);
+
+        let book = current.book();
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
@@ -243,20 +253,22 @@ pub extern "C" fn callback_sload(exectx: usize, sp: usize) -> u64 {
 
     let key: &mut U256 = rawptrs.stack_mut(sp, 1);
 
-    let (val, warm) = rawptrs.sload(key);
+    let (val, gas) = rawptrs.sload(key);
     *key = val;
 
-    warm as u64
+    gas
 }
 
 pub extern "C" fn callback_sstore(exectx: usize, sp: usize) -> u64 {
     let rawptrs = JitEvmPtrs::from_raw(exectx);
 
-    let key: &U256 = rawptrs.stack(sp, 1);
-    let value: &U256 = rawptrs.stack(sp, 2);
+    let key: &mut U256 = rawptrs.stack_mut(sp, 1);
+    let value: &mut U256 = rawptrs.stack_mut(sp, 2);
 
-    let (original, current, new, warm) = rawptrs.sstore(*key, *value);
+    let (gas, refund) = rawptrs.sstore(*key, *value);
 
-    // TODO: return gas amount
+    *key = U256::from(gas);
+    *value = U256::from(refund);
+
     0
 }

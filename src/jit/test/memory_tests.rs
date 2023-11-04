@@ -1,10 +1,9 @@
-use super::{expect_halt, expect_success, test_jit};
+use super::{expect_halt, expect_success, memory_gas_calc, test_jit};
 use crate::jit::{gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success};
 use alloy_primitives::U256;
 use rand::Rng;
 use revm::db::InMemoryDB;
 use revm_primitives::LatestSpec;
-use std::ops::{BitAnd, Not};
 
 #[test]
 fn operations_jit_test_mload() {
@@ -39,15 +38,9 @@ fn operations_jit_test_mload() {
 
         let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
         let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
-        let mem_cost = gas::memory_gas::<LatestSpec>();
         let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
-        let offset = (max + 32) as u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+        let mem_gas = memory_gas_calc::<LatestSpec>(max as u64 + 32);
         let expected_gas = init_cost + (push_cost + const_cost) * 20 + mem_gas;
 
         let result =
@@ -75,7 +68,6 @@ fn operations_stack_underflow_mload() {
     let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
     let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
-    let mem_cost = gas::memory_gas::<LatestSpec>();
 
     let mut ops = Vec::new();
 
@@ -95,12 +87,7 @@ fn operations_stack_underflow_mload() {
     }
     ops.push(Mload);
 
-    let offset = 32u64;
-    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-    let size = up.checked_add(offset).expect("Overflow on add");
-    let size_words = size / 32;
-
-    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+    let mem_gas = memory_gas_calc::<LatestSpec>(32);
     let expected_gas = init_cost + push_cost + const_cost + mem_gas;
 
     let db = InMemoryDB::default();
@@ -126,7 +113,6 @@ fn operations_jit_test_mstore8() {
         let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
         let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore8);
-        let mem_cost = gas::memory_gas::<LatestSpec>();
 
         let mem_range = 0..(expected_memory.len() - BYTES);
 
@@ -146,12 +132,7 @@ fn operations_jit_test_mstore8() {
         let result =
             test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
 
-        let offset = (max + 1) as u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+        let mem_gas = memory_gas_calc::<LatestSpec>(max as u64 + 1);
         let expected_gas = init_cost + (push_cost * 2 + const_cost) * 20 + mem_gas;
 
         expect_success!(test_mstore8, result, Success::Stop, expected_gas);
@@ -175,7 +156,6 @@ fn operations_stack_underflow_mstore8() {
     let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
     let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore8);
-    let mem_cost = gas::memory_gas::<LatestSpec>();
 
     let mut ops = Vec::new();
 
@@ -195,12 +175,7 @@ fn operations_stack_underflow_mstore8() {
     }
     ops.push(Mstore8);
 
-    let offset = 32u64;
-    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-    let size = up.checked_add(offset).expect("Overflow on add");
-    let size_words = size / 32;
-
-    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+    let mem_gas = memory_gas_calc::<LatestSpec>(32);
     let expected_gas = init_cost + push_cost * 2 + const_cost + mem_gas;
 
     let db = InMemoryDB::default();
@@ -219,7 +194,6 @@ fn operations_jit_test_mstore() {
     let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
     let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
-    let mem_cost = gas::memory_gas::<LatestSpec>();
 
     for _ in 0..1000 {
         let mut ops = Vec::new();
@@ -246,12 +220,7 @@ fn operations_jit_test_mstore() {
         let result =
             test_jit(LatestSpec, ops, &mut execution_context).expect("Contract build failed");
 
-        let offset = (max + 32) as u64;
-        let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-        let size = up.checked_add(offset).expect("Overflow on add");
-        let size_words = size / 32;
-
-        let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+        let mem_gas = memory_gas_calc::<LatestSpec>(max as u64 + 32);
         let expected_gas = init_cost + (push_cost * 2 + const_cost) * 20 + mem_gas;
         expect_success!(test_mstore, result, Success::Stop, expected_gas);
 
@@ -275,7 +244,6 @@ fn operations_stack_underflow_mstore() {
     let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
     let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
-    let mem_cost = gas::memory_gas::<LatestSpec>();
 
     let mut ops = Vec::new();
 
@@ -295,12 +263,7 @@ fn operations_stack_underflow_mstore() {
     }
     ops.push(Mstore);
 
-    let offset = (1 + 32) as u64;
-    let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-    let size = up.checked_add(offset).expect("Overflow on add");
-    let size_words = size / 32;
-
-    let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+    let mem_gas = memory_gas_calc::<LatestSpec>(1 + 32);
     let expected_gas = init_cost + push_cost * 2 + const_cost + mem_gas;
 
     let db = InMemoryDB::default();

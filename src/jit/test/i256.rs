@@ -8,9 +8,6 @@ pub enum Sign {
     Zero,
 }
 
-pub const SIGN_BIT_MASK: U256 =
-    uint!(0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF_U256);
-
 pub const MIN_NEGATIVE_VALUE: U256 =
     uint!(0x8000000000000000000000000000000000000000000000000000000000000000_U256);
 
@@ -371,11 +368,6 @@ pub mod div_u256 {
     fn mul_u64(a: u64, b: u64, carry: u64) -> (u64, u64) {
         let (hi, lo) = split_u128(a as u128 * b as u128 + carry as u128);
         (lo, hi)
-    }
-
-    #[inline(always)]
-    const fn split(a: u64) -> (u64, u64) {
-        (a >> 32, a & 0xFFFF_FFFF)
     }
 
     #[inline(always)]

@@ -1,4 +1,4 @@
-use super::{expect_halt, expect_stack_overflow, expect_success, test_jit};
+use super::{expect_halt, expect_stack_overflow, expect_success, memory_gas_calc, test_jit};
 use crate::jit::{
     gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success, EVM_STACK_SIZE,
 };
@@ -7,7 +7,6 @@ use paste::paste;
 use rand::Rng;
 use revm::InMemoryDB;
 use revm_primitives::LatestSpec;
-use std::ops::{BitAnd, Not};
 
 macro_rules! check_context {
     ($evmop:expr, $setter:ident, $ty:ident) => {{
@@ -30,15 +29,9 @@ macro_rules! check_context {
             let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(1, U256::ZERO));
 
             let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
-            let mem_cost = gas::memory_gas::<LatestSpec>();
             let init_cost = gas::init_gas::<LatestSpec>(&[]);
 
-            let offset = 32u64;
-            let up = offset.bitand(31).not().wrapping_add(1).bitand(31);
-            let size = up.checked_add(offset).expect("Overflow on add");
-            let size_words = size / 32;
-
-            let mem_gas = (size_words * size_words) / 512 + mem_cost * size_words;
+            let mem_gas = memory_gas_calc::<LatestSpec>(32);
             let expected_gas = init_cost + push_cost + const_cost + mem_gas + op_cost;
 
             expect_success!($setter, result, Success::Stop, expected_gas);

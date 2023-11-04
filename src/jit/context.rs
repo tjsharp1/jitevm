@@ -138,7 +138,7 @@ impl JitEvmPtrs {
         }
     }
 
-    pub fn sload(&self, key: &U256) -> (U256, bool) {
+    pub fn sload(&self, key: &U256) -> (U256, u64) {
         let evm_state: &mut EVMState = unsafe { &mut *(self.evm_state as *mut _) };
         let tx_context: &TransactionContext = unsafe { &*(self.transaction_context as *const _) };
         let address = tx_context.contract_address();
@@ -146,7 +146,7 @@ impl JitEvmPtrs {
         evm_state.sload(address, *key)
     }
 
-    pub fn sstore(&self, key: U256, value: U256) -> (U256, U256, U256, bool) {
+    pub fn sstore(&self, key: U256, value: U256) -> (u64, i64) {
         let evm_state: &mut EVMState = unsafe { &mut *(self.evm_state as *mut _) };
         let tx_context: &TransactionContext = unsafe { &*(self.transaction_context as *const _) };
         let address = tx_context.contract_address();
@@ -156,10 +156,6 @@ impl JitEvmPtrs {
 
     pub fn mem_slice(&self, ptr: usize, size: usize) -> &[u8] {
         unsafe { std::slice::from_raw_parts((self.memory + ptr) as *const u8, size) }
-    }
-
-    pub fn stack(&self, sp: usize, offset: usize) -> &U256 {
-        unsafe { &*((sp - offset * EVM_STACK_ELEMENT_SIZE as usize) as *const _) }
     }
 
     pub fn stack_mut(&self, sp: usize, offset: usize) -> &mut U256 {

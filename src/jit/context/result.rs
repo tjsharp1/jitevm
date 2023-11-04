@@ -94,7 +94,7 @@ pub enum ExecutionResult {
     Success {
         reason: Success,
         gas_used: u64,
-        //gas_refunded: u64,
+        gas_refunded: u64,
         //logs: Vec<Log>,
         //output: Output,
     },
@@ -121,7 +121,11 @@ impl From<JitContractExecutionResult> for ExecutionResult {
         if code.is_success() {
             let reason = code.into();
 
-            ExecutionResult::Success { reason, gas_used }
+            ExecutionResult::Success {
+                reason,
+                gas_used,
+                gas_refunded,
+            }
         } else if code.is_revert() {
             // TODO: revert instruction...
             ExecutionResult::Revert {
@@ -261,7 +265,6 @@ impl From<JitContractResultCode> for u32 {
 pub(crate) struct JitContractExecutionResult {
     result_code: u32,
     gas_used: u64,
-    // TODO: figure out gas refunds
     gas_refunded: u64,
     // TODO: finish the below, revert will have output as well, all remaining will have gas_used
     // logs: Vec<Log>,
@@ -375,15 +378,13 @@ impl<'ctx> JitContractExecutionResult {
             .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
         ctx.builder.build_store(gas_used_ptr, gas_used)?;
 
-        //TODO: gas_remaining calc.... get this when we start gas accounting!
         let gas_refund_ptr = ctx.builder.build_struct_gep(
             ctx.types.execution_result,
             ptr,
             2,
             "gas_refund_offset",
         )?;
-        let weird_number = ctx.types.type_i64.const_int(43, false);
-        ctx.builder.build_store(gas_refund_ptr, weird_number)?;
+        ctx.builder.build_store(gas_refund_ptr, book.gas_refund)?;
 
         ctx.builder.build_return(None)?;
         Ok(())

@@ -15,7 +15,7 @@ pub struct EVMState {
     storage: unsafe fn(*const (), Address, U256) -> U256,
     block_hash: unsafe fn(*const (), U256) -> B256,
     sload_gas: fn(bool) -> u64,
-    sstore_gas: fn(U256, U256, U256, bool) -> (u64, u64),
+    sstore_gas: fn(U256, U256, U256, bool) -> (u64, i64),
 }
 
 impl EVMState {
@@ -50,8 +50,8 @@ impl EVMState {
         }
     }
 
-    // TODO: gas accounting
-    pub fn sload(&mut self, address: Address, index: U256) -> (U256, bool) {
+    #[inline]
+    fn load(&mut self, address: Address, index: U256) -> (U256, bool) {
         let account = self.state.get_mut(&address).unwrap();
 
         match account.storage.entry(index) {
@@ -64,13 +64,15 @@ impl EVMState {
         }
     }
 
-    pub fn sstore(
-        &mut self,
-        address: Address,
-        index: U256,
-        value: U256,
-    ) -> (U256, U256, U256, bool) {
-        let (current, warm) = self.sload(address, index);
+    pub fn sload(&mut self, address: Address, index: U256) -> (U256, u64) {
+        let (result, warm) = self.load(address, index);
+
+        (result, (self.sload_gas)(warm))
+    }
+
+    #[inline]
+    fn store(&mut self, address: Address, index: U256, value: U256) -> (U256, U256, U256, bool) {
+        let (current, warm) = self.load(address, index);
 
         // Expect these to be warm by now.
         let account = self.state.get_mut(&address).unwrap();
@@ -84,6 +86,11 @@ impl EVMState {
         slot.present_value = value;
 
         (slot.previous_or_original_value, current, value, warm)
+    }
+
+    pub fn sstore(&mut self, address: Address, index: U256, value: U256) -> (u64, i64) {
+        let (old, current, new, warm) = self.store(address, index, value);
+        (self.sstore_gas)(old, current, new, warm)
     }
 }
 
@@ -173,46 +180,46 @@ mod test {
         let _ = evm_state.load_account(ADDRESS);
         let _ = evm_state.load_account(ADDRESS_EMPTY);
 
-        let (item0, warm) = evm_state.sload(ADDRESS, U256::ZERO);
+        let (item0, warm) = evm_state.load(ADDRESS, U256::ZERO);
         assert_eq!(item0, ITEM0);
         assert_eq!(warm, false);
 
-        let (item5, warm) = evm_state.sload(ADDRESS, U256::from(5));
+        let (item5, warm) = evm_state.load(ADDRESS, U256::from(5));
         assert_eq!(item5, ITEM5);
         assert_eq!(warm, false);
 
-        let (item_empty, warm) = evm_state.sload(ADDRESS, U256::from(99));
+        let (item_empty, warm) = evm_state.load(ADDRESS, U256::from(99));
         assert_eq!(item_empty, U256::ZERO);
         assert_eq!(warm, false);
 
-        let (item_empty, warm) = evm_state.sload(ADDRESS_EMPTY, U256::ZERO);
+        let (item_empty, warm) = evm_state.load(ADDRESS_EMPTY, U256::ZERO);
         assert_eq!(item_empty, U256::ZERO);
         assert_eq!(warm, false);
 
-        let (item0, warm) = evm_state.sload(ADDRESS, U256::ZERO);
+        let (item0, warm) = evm_state.load(ADDRESS, U256::ZERO);
         assert_eq!(item0, ITEM0);
         assert_eq!(warm, true);
 
-        let (item5, warm) = evm_state.sload(ADDRESS, U256::from(5));
+        let (item5, warm) = evm_state.load(ADDRESS, U256::from(5));
         assert_eq!(item5, ITEM5);
         assert_eq!(warm, true);
 
         let (item9orig, item9current, item9new, warm) =
-            evm_state.sstore(ADDRESS, U256::from(9), U256::from(2424));
+            evm_state.store(ADDRESS, U256::from(9), U256::from(2424));
         assert_eq!(item9orig, ITEM9);
         assert_eq!(item9current, ITEM9);
         assert_eq!(item9new, U256::from(2424));
         assert_eq!(warm, false);
 
         let (item9orig, item9current, item9new, warm) =
-            evm_state.sstore(ADDRESS, U256::from(9), U256::from(99));
+            evm_state.store(ADDRESS, U256::from(9), U256::from(99));
         assert_eq!(item9orig, ITEM9);
         assert_eq!(item9current, U256::from(2424));
         assert_eq!(item9new, U256::from(99));
         assert_eq!(warm, true);
 
         let (item9orig, item9current, item9new, warm) =
-            evm_state.sstore(ADDRESS, U256::from(9), U256::from(99));
+            evm_state.store(ADDRESS, U256::from(9), U256::from(99));
         assert_eq!(item9orig, ITEM9);
         assert_eq!(item9current, U256::from(99));
         assert_eq!(item9new, U256::from(99));
