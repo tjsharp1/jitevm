@@ -510,7 +510,7 @@ pub fn sstore_gas<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bo
 
 fn sstore_cost<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> u64 {
     if SPEC::enabled(SpecId::LATEST) {
-        let warm_cold = if warm { 100 } else { 2100 };
+        let warm_cold = if warm { 0 } else { 2100 };
 
         if new == current {
             100

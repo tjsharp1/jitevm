@@ -1,0 +1,26 @@
+#define macro MAIN() = {
+    0x7530                   // [ITERATIONS]
+loop:
+    dup1 iszero end jumpi    // [ITERATIONS]
+    dup1 0x0 sstore          // [ITERATIONS]
+    dup1 0x1 sstore          // [ITERATIONS]
+    dup1 0x2 sstore          // [ITERATIONS]
+    dup1 0x3 sstore          // [ITERATIONS]
+    dup1 0x4 sstore          // [ITERATIONS]
+    dup1 0x5 sstore          // [ITERATIONS]
+    dup1 0x6 sstore          // [ITERATIONS]
+    dup1 0x7 sstore          // [ITERATIONS]
+    dup1 0x8 sstore          // [ITERATIONS]
+    dup1 0x9 sstore          // [ITERATIONS]
+
+    0x01 swap1 sub           // [ITERATIONS]
+    loop jump                // [ITERATIONS]
+end:
+    // gimme some gas refunds!
+    0x00 0x5 sstore          // [ITERATIONS]
+    0x00 0x6 sstore          // [ITERATIONS]
+    0x00 0x7 sstore          // [ITERATIONS]
+    0x00 0x8 sstore          // [ITERATIONS]
+    0x00 0x9 sstore          // [ITERATIONS]
+	stop                     // [ITERATIONS]
+}

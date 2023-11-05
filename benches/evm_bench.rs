@@ -57,6 +57,12 @@ pub fn evm_benchmark(c: &mut Criterion) {
     let code = load_evm_code("sha3");
     let args6 = get_env_args(code);
 
+    let code = load_evm_code("store");
+    let args7 = get_env_args(code);
+
+    let code = load_evm_code("sload");
+    let args8 = get_env_args(code);
+
     let mut group = c.benchmark_group("REVM benchmarks");
     group.measurement_time(Duration::from_secs(30));
     group.bench_with_input(BenchmarkId::new("REVM", "fibonacci"), &args1, |b, i| {
@@ -77,6 +83,12 @@ pub fn evm_benchmark(c: &mut Criterion) {
         b.iter(|| interpreter_bench(i))
     });
     group.bench_with_input(BenchmarkId::new("REVM", "sha3"), &args6, |b, i| {
+        b.iter(|| interpreter_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("REVM", "store"), &args7, |b, i| {
+        b.iter(|| interpreter_bench(i))
+    });
+    group.bench_with_input(BenchmarkId::new("REVM", "sload"), &args8, |b, i| {
         b.iter(|| interpreter_bench(i))
     });
     group.finish();
@@ -127,6 +139,20 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
         .build(LatestSpec, code.augment().index())
         .expect("Could not JIT contract");
 
+    let code = load_evm_code("store");
+    let (_, args7) = get_env_args(code.clone());
+    let contract7 = JitContractBuilder::with_context("contract7", &context)
+        .expect("Could not build builder")
+        .build(LatestSpec, code.augment().index())
+        .expect("Could not JIT contract");
+
+    let code = load_evm_code("sload");
+    let (_, args8) = get_env_args(code.clone());
+    let contract8 = JitContractBuilder::with_context("contract8", &context)
+        .expect("Could not build builder")
+        .build(LatestSpec, code.augment().index())
+        .expect("Could not JIT contract");
+
     let mut group = c.benchmark_group("JIT benchmarks");
     group.measurement_time(Duration::from_secs(30));
     group.bench_with_input(
@@ -157,6 +183,16 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
     group.bench_with_input(
         BenchmarkId::new("JIT", "sha3"),
         &(args6, contract6),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "store"),
+        &(args7, contract7),
+        |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("JIT", "sload"),
+        &(args8, contract8),
         |b, i| b.iter(|| jitevm_bench(LatestSpec, i)),
     );
     group.finish();

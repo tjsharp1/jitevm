@@ -121,9 +121,11 @@ impl From<JitContractExecutionResult> for ExecutionResult {
         if code.is_success() {
             let reason = code.into();
 
+            // TODO: need to handle transferring the refund amount.
+
             ExecutionResult::Success {
                 reason,
-                gas_used,
+                gas_used: gas_used - gas_refunded,
                 gas_refunded,
             }
         } else if code.is_revert() {

@@ -68,6 +68,7 @@ macro_rules! assert_evm_jit_equivalence {
         let ResultAndState { result, .. } = test_evm_with_code(code);
 
         println!("TJDEBUG evmresult {:#?}", result);
+        println!("TJDEBUG jitresult {:#?}", jit_result);
         match result {
             REVMExecutionResult::Success {
                 reason,
@@ -129,4 +130,14 @@ fn test_evm_and_jit_mstore8() {
 #[test]
 fn test_evm_and_jit_sha3() {
     assert_evm_jit_equivalence!(sha3);
+}
+
+#[test]
+fn test_evm_and_jit_sstore() {
+    assert_evm_jit_equivalence!(store);
+}
+
+#[test]
+fn test_evm_and_jit_sload() {
+    assert_evm_jit_equivalence!(sload);
 }
