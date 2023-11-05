@@ -469,6 +469,7 @@ impl EvmOp {
                 0x17 => Ok((Or, 1)),
                 0x18 => Ok((Xor, 1)),
                 0x19 => Ok((Not, 1)),
+                0x1a => Ok((Byte, 1)),
                 0x1b => Ok((Shl, 1)),
                 0x1c => Ok((Shr, 1)),
                 0x1d => Ok((Sar, 1)),

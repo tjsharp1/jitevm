@@ -513,7 +513,7 @@ fn sstore_cost<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool)
         let warm_cold = if warm { 0 } else { 2100 };
 
         if new == current {
-            100
+            100 + warm_cold
         } else if current == original {
             let gas = if original == U256::ZERO { 20000 } else { 2900 };
             gas + warm_cold

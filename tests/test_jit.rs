@@ -8,7 +8,7 @@ use revm::{
     },
     EVM,
 };
-use revm_primitives::{LatestSpec, Spec};
+use revm_primitives::LatestSpec;
 use std::path::PathBuf;
 
 fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
@@ -140,4 +140,9 @@ fn test_evm_and_jit_sstore() {
 #[test]
 fn test_evm_and_jit_sload() {
     assert_evm_jit_equivalence!(sload);
+}
+
+#[test]
+fn test_evm_and_jit_reth_random_stuff() {
+    assert_evm_jit_equivalence!(reth_random_stuff);
 }

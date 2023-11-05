@@ -16,56 +16,25 @@ pub(crate) fn iszero_op<'a, 'ctx, SPEC: Spec>(
     build_stack_check!(ctx, current, 1, 0);
 
     let book = current.book();
-    let next = current.next();
-    let this = current.block();
+
+    let const_0 = ctx.types.type_stackel.const_int(0, false);
+    let const_1 = ctx.types.type_stackel.const_int(1, false);
 
     let (book, val) = build_stack_pop!(ctx, book);
-    let cmp = ctx.builder.build_int_compare(
-        IntPredicate::EQ,
-        ctx.types.type_stackel.const_int(0, false),
-        val,
-        "",
-    )?;
+    let cmp = ctx
+        .builder
+        .build_int_compare(IntPredicate::EQ, const_0, val, "")?;
 
-    let push_0 = JitEvmEngineSimpleBlock::new(
-        ctx,
-        this.block,
-        &format!(
-            "Instruction #{}: {:?} / push 0",
-            current.idx(),
-            current.op()
-        ),
-        &format!("_{}_0", current.idx()),
-    )?;
-    let push_1 = JitEvmEngineSimpleBlock::new(
-        ctx,
-        push_0.block,
-        &format!(
-            "Instruction #{}: {:?} / push 1",
-            current.idx(),
-            current.op()
-        ),
-        &format!("_{}_1", current.idx()),
-    )?;
+    let result = ctx
+        .builder
+        .build_select(cmp, const_1, const_0, "iszero")?
+        .into_int_value();
 
-    ctx.builder.position_at_end(this.block);
+    let book = build_stack_push!(ctx, book, result);
+
     ctx.builder
-        .build_conditional_branch(cmp, push_1.block, push_0.block)?;
-    push_0.add_incoming(&book, this);
-    push_1.add_incoming(&book, this);
-
-    ctx.builder.position_at_end(push_0.block);
-    let const_0 = ctx.types.type_stackel.const_int(0, false);
-    let book_0 = build_stack_push!(ctx, book, const_0);
-    ctx.builder.build_unconditional_branch(next.block)?;
-    next.add_incoming(&book_0, &push_0);
-
-    ctx.builder.position_at_end(push_1.block);
-    let const_1 = ctx.types.type_stackel.const_int(1, false);
-    let book_1 = build_stack_push!(ctx, book, const_1);
-    ctx.builder.build_unconditional_branch(next.block)?;
-    next.add_incoming(&book_1, &push_1);
-
+        .build_unconditional_branch(current.next().block)?;
+    current.next().add_incoming(&book, current.block());
     Ok(())
 }
 

@@ -38,3 +38,7 @@ rand = "0.8.5"
 [[bench]]
 name = "evm_bench"
 harness = false
+
+[[bench]]
+name = "storage_bench"
+harness = false

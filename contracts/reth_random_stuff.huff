@@ -1,0 +1,38 @@
+#define macro MAIN() = {
+    0xc350                   // [ITERATIONS]
+loop:
+    dup1 iszero end jumpi    // [ITERATIONS]
+
+    0x00a0 0x0000 sha3       // [HASH, ITERATIONS]
+
+    dup1   0x0007 byte       // [key, HASH, ITERATIONS]
+    sload                    // [value, HASH, ITERATIONS]
+    0x00000     mstore       // [HASH, ITERATIONS]
+
+    dup1   0x0012 byte       // [key, HASH, ITERATIONS]
+    sload                    // [value, HASH, ITERATIONS]
+    0x00020     mstore       // [HASH, ITERATIONS]
+
+    dup1   0x001e byte       // [key, HASH, ITERATIONS]
+    sload                    // [value, HASH, ITERATIONS]
+    0x00040     mstore       // [HASH, ITERATIONS]
+
+    dup1   0x000f byte       // [key, HASH, ITERATIONS]
+    sload                    // [value, HASH, ITERATIONS]
+    0x00060     mstore       // [HASH, ITERATIONS]
+
+    dup1   0x000d byte       // [key, HASH, ITERATIONS]
+    sload                    // [value, HASH, ITERATIONS]
+    0x00080     mstore       // [HASH, ITERATIONS]
+
+    pop                      // [ITERATIONS]
+    0x01 swap1 sub           // [ITERATIONS]
+    loop jump                // [ITERATIONS]
+end:
+    0x00 0x5 sstore          // [ITERATIONS]
+    0x00 0x6 sstore          // [ITERATIONS]
+    0x00 0x7 sstore          // [ITERATIONS]
+    0x00 0x8 sstore          // [ITERATIONS]
+    0x00 0x9 sstore          // [ITERATIONS]
+	stop                     // [ITERATIONS]
+}
