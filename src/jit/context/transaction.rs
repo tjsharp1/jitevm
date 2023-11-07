@@ -1,8 +1,16 @@
-use crate::jit::{context::JitEvmPtrs, contract::BuilderContext, JitEvmEngineError};
+use crate::jit::{
+    context::JitEvmPtrs,
+    contract::BuilderContext,
+    cursor::CurrentInstruction,
+    gas::{build_gas_check, const_cost},
+    ops::{build_stack_check, build_stack_push},
+    JitEvmEngineError,
+};
 use alloy_primitives::{Address, U256};
 use inkwell::{
     context::Context, targets::TargetData, types::StructType, values::IntValue, AddressSpace,
 };
+use revm_primitives::Spec;
 
 #[derive(Clone, Debug)]
 pub struct TransactionConfig {
@@ -37,6 +45,7 @@ impl Default for TransactionConfig {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct TransactionContext {
+    pub origin: U256,
     pub caller: U256,
     pub gas_price: U256,
     pub priority_fee: U256,
@@ -61,6 +70,7 @@ impl TransactionContext {
         } = cfg;
 
         TransactionContext {
+            origin: caller.into_word().into(),
             caller: caller.into_word().into(),
             gas_price,
             priority_fee,
@@ -87,6 +97,7 @@ impl<'ctx> TransactionContext {
         let i64_type = ctx.i64_type();
 
         let fields = vec![
+            u256_type.into(), // origin
             u256_type.into(), // caller
             u256_type.into(), // gas_price
             u256_type.into(), // priority_fee
@@ -116,7 +127,7 @@ impl<'ctx> TransactionContext {
         let ptr = ctx.builder.build_struct_gep(
             ctx.types.transaction_context,
             ptr,
-            7,
+            8,
             "get_tx_gas_limit",
         )?;
 
@@ -124,5 +135,130 @@ impl<'ctx> TransactionContext {
             .builder
             .build_load(ctx.types.type_i64, ptr, "load_tx_gas_limit")?
             .into_int_value())
+    }
+
+    pub(crate) fn build_get_codesize<'a, SPEC: Spec>(
+        ctx: &BuilderContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        build_gas_check!(ctx, current);
+        build_stack_check!(ctx, current, 0, 1);
+
+        let size = current.code().len as u64;
+        let value = ctx.types.type_stackel.const_int(size, false);
+
+        let book = current.book();
+        let book = build_stack_push!(ctx, book, value);
+
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
+
+        Ok(())
+    }
+
+    pub(crate) fn build_get_callvalue<'a, SPEC: Spec>(
+        ctx: &BuilderContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        build_gas_check!(ctx, current);
+        build_stack_check!(ctx, current, 0, 1);
+
+        let book = current.book();
+        let ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, book.execution_context)?;
+        let ptr = ctx.builder.build_pointer_cast(
+            ptr,
+            ctx.types
+                .transaction_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let ptr =
+            ctx.builder
+                .build_struct_gep(ctx.types.transaction_context, ptr, 5, "get_value")?;
+
+        let value = ctx
+            .builder
+            .build_load(ctx.types.type_stackel, ptr, "load_value")?
+            .into_int_value();
+
+        let book = build_stack_push!(ctx, book, value);
+
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
+
+        Ok(())
+    }
+
+    pub(crate) fn build_get_caller<'a, SPEC: Spec>(
+        ctx: &BuilderContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        build_gas_check!(ctx, current);
+        build_stack_check!(ctx, current, 0, 1);
+
+        let book = current.book();
+        let ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, book.execution_context)?;
+        let ptr = ctx.builder.build_pointer_cast(
+            ptr,
+            ctx.types
+                .transaction_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let ptr =
+            ctx.builder
+                .build_struct_gep(ctx.types.transaction_context, ptr, 1, "get_caller")?;
+
+        let value = ctx
+            .builder
+            .build_load(ctx.types.type_stackel, ptr, "load_caller")?
+            .into_int_value();
+
+        let book = build_stack_push!(ctx, book, value);
+
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
+
+        Ok(())
+    }
+
+    pub(crate) fn build_get_origin<'a, SPEC: Spec>(
+        ctx: &BuilderContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        build_gas_check!(ctx, current);
+        build_stack_check!(ctx, current, 0, 1);
+
+        let book = current.book();
+        let ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, book.execution_context)?;
+        let ptr = ctx.builder.build_pointer_cast(
+            ptr,
+            ctx.types
+                .transaction_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let ptr =
+            ctx.builder
+                .build_struct_gep(ctx.types.transaction_context, ptr, 0, "get_origin")?;
+
+        let value = ctx
+            .builder
+            .build_load(ctx.types.type_stackel, ptr, "load_origin")?
+            .into_int_value();
+
+        let book = build_stack_push!(ctx, book, value);
+
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
+
+        Ok(())
     }
 }

@@ -2,7 +2,7 @@ use crate::jit::{
     contract::BuilderContext,
     cursor::CurrentInstruction,
     gas::{build_gas_check, const_cost},
-    JitEvmEngineError,
+    EvmOp, JitEvmEngineError,
 };
 use alloy_primitives::U256;
 use inkwell::AddressSpace;
@@ -311,15 +311,20 @@ macro_rules! build_stack_read {
 pub(crate) fn build_stack_swap_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
-    idx: u64,
 ) -> Result<(), JitEvmEngineError> {
-    let idx = idx + 1;
+    let swap1 = EvmOp::Swap1.opcode();
+    let swap16 = EvmOp::Swap16.opcode();
+    let opcode = current.op().opcode();
+
+    assert!(swap1 <= opcode && opcode <= swap16);
+
+    let idx = (opcode - swap1) as u64 + 2;
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, idx, 0);
 
     let book = current.book();
     let (book, a) = build_stack_read!(ctx, book, 1);
-    let (book, b) = build_stack_read!(ctx, book, idx);
+    let (book, b) = build_stack_read!(ctx, book, idx as u64);
     let book = build_stack_write!(ctx, book, 1, b);
     let book = build_stack_write!(ctx, book, idx, a);
 
@@ -333,9 +338,16 @@ pub(crate) fn build_stack_swap_op<'a, 'ctx, SPEC: Spec>(
 pub(crate) fn build_dup_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
-    idx: u64,
 ) -> Result<(), JitEvmEngineError> {
     use crate::jit::{EVM_JIT_STACK_ALIGN, EVM_STACK_ELEMENT_SIZE};
+
+    let dup1 = EvmOp::Dup1.opcode();
+    let dup16 = EvmOp::Dup16.opcode();
+    let opcode = current.op().opcode();
+
+    assert!(dup1 <= opcode && opcode <= dup16);
+
+    let idx = (opcode - dup1) as u64 + 1;
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, idx, 1);
 

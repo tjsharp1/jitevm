@@ -402,13 +402,9 @@ fn operations_stack_underflow_sha3() {
 // TODO: remaining instructions
 //Address,
 //Balance,
-//Origin,
-//Caller,
-//Callvalue,
 //Calldataload,
 //Calldatasize,
 //CalldataCopy,
-//Codesize,
 //CodeCopy,
 //GasPrice,
 //ExtCodeSize,

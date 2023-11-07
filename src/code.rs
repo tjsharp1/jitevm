@@ -655,6 +655,7 @@ impl EvmCode {
 
 #[derive(Debug, Clone)]
 pub struct IndexedEvmCode {
+    pub len: usize,
     pub code: EvmCode,
     pub opidx2target: HashMap<usize, U256>,
     pub target2opidx: HashMap<U256, usize>,
@@ -663,6 +664,7 @@ pub struct IndexedEvmCode {
 
 impl IndexedEvmCode {
     pub fn new_from_evmcode(code: EvmCode) -> Self {
+        let len = code.to_bytes().len();
         let mut opidx2target = HashMap::new();
         let mut target2opidx = HashMap::new();
         let mut jumpdests = HashSet::new();
@@ -680,6 +682,7 @@ impl IndexedEvmCode {
 
         Self {
             code,
+            len,
             opidx2target,
             target2opidx,
             jumpdests,

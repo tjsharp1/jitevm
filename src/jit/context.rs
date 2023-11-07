@@ -249,6 +249,14 @@ impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
     pub fn set_block_gas_limit(&mut self, gas_limit: U256) {
         self.block_context.gas_limit = gas_limit;
     }
+
+    pub fn set_callvalue(&mut self, value: U256) {
+        self.transaction_context.value = value;
+    }
+
+    pub fn set_caller(&mut self, caller: Address) {
+        self.transaction_context.caller = caller.into_word().into();
+    }
 }
 
 impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {

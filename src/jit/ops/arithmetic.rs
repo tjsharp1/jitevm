@@ -126,7 +126,6 @@ pub(crate) fn build_arithmetic_op<'a, 'ctx, SPEC: Spec>(
 pub(crate) fn build_cmp_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
-    predicate: IntPredicate,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
@@ -137,6 +136,16 @@ pub(crate) fn build_cmp_op<'a, 'ctx, SPEC: Spec>(
 
     let (book, a) = build_stack_pop!(ctx, book);
     let (book, b) = build_stack_pop!(ctx, book);
+
+    let predicate = match current.op() {
+        EvmOp::Eq => IntPredicate::EQ,
+        EvmOp::Lt => IntPredicate::ULT,
+        EvmOp::Gt => IntPredicate::UGT,
+        EvmOp::Slt => IntPredicate::SLT,
+        EvmOp::Sgt => IntPredicate::SGT,
+        _ => panic!("Invalid comparison opcode!"),
+    };
+
     let cmp = ctx.builder.build_int_compare(predicate, a, b, "")?;
 
     let push_0 = JitEvmEngineSimpleBlock::new(
