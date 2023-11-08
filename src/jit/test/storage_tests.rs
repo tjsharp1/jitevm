@@ -35,7 +35,7 @@ fn operations_jit_test_sstore() {
 
         let init_cost = gas::init_gas::<LatestSpec>(&[]);
         let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
-        let (sstore_cost, refund) =
+        let (sstore_cost, _refund) =
             gas::sstore_gas::<LatestSpec>(U256::ZERO, U256::ZERO, U256::from(1), false);
 
         let expected_gas = init_cost + push_cost * 40 + sstore_cost * 20;
@@ -72,25 +72,18 @@ fn operations_stack_underflow_sstore() {
         let mut cloned = ops.clone();
         cloned.push(EvmOp::Sstore);
 
-        let expected_gas = init_cost + push_gas * i;
-
         let db = InMemoryDB::default();
 
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(
-            stack_underflow_sstore,
-            result,
-            Halt::StackUnderflow,
-            expected_gas
-        );
+        expect_halt!(stack_underflow_sstore, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i)));
     }
     ops.push(EvmOp::Sstore);
 
-    let (sstore_cost, refund) =
+    let (sstore_cost, _refund) =
         gas::sstore_gas::<LatestSpec>(U256::ZERO, U256::ZERO, U256::ZERO, false);
 
     let expected_gas = init_cost + push_gas * 2 + sstore_cost;
@@ -171,19 +164,12 @@ fn operations_stack_underflow_sload() {
         let mut cloned = ops.clone();
         cloned.push(EvmOp::Sload);
 
-        let expected_gas = init_cost + push_gas * i;
-
         let db = InMemoryDB::default();
 
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(
-            stack_underflow_sload,
-            result,
-            Halt::StackUnderflow,
-            expected_gas
-        );
+        expect_halt!(stack_underflow_sload, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i)));
     }

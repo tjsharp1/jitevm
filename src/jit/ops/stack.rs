@@ -77,7 +77,7 @@ macro_rules! build_stack_check {
                 .builder
                 .build_int_compare(IntPredicate::UGE, book.sp, min_sp, "")?;
 
-            let instruction_label = format!("{:?}_{}_no_underfl", $current.op(), $current.idx());
+            let instruction_label = format!("i{}_no_underfl", $current.idx());
             let idx = format!("_{}", $current.idx());
             let next_block = JitEvmEngineSimpleBlock::new(
                 $ctx,
@@ -118,7 +118,7 @@ macro_rules! build_stack_check {
                 .builder
                 .build_int_compare(IntPredicate::ULE, book.sp, max_sp, "")?;
 
-            let instruction_label = format!("{:?}_{}_no_ovf", $current.op(), $current.idx());
+            let instruction_label = format!("i{}_no_ovf", $current.idx());
             let idx = format!("_{}", $current.idx());
             let next_block = JitEvmEngineSimpleBlock::new(
                 $ctx,

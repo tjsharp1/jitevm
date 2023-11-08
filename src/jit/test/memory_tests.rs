@@ -75,13 +75,11 @@ fn operations_stack_underflow_mload() {
         let mut cloned = ops.clone();
         cloned.push(Mload);
 
-        let expected_gas = init_cost + push_cost * i;
-
         let db = InMemoryDB::default();
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(mload, result, Halt::StackUnderflow, expected_gas);
+        expect_halt!(mload, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i)));
     }
@@ -163,13 +161,11 @@ fn operations_stack_underflow_mstore8() {
         let mut cloned = ops.clone();
         cloned.push(Mstore8);
 
-        let expected_gas = init_cost + push_cost * i;
-
         let db = InMemoryDB::default();
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(mload, result, Halt::StackUnderflow, expected_gas);
+        expect_halt!(mload, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i)));
     }
@@ -251,13 +247,11 @@ fn operations_stack_underflow_mstore() {
         let mut cloned = ops.clone();
         cloned.push(Mstore);
 
-        let expected_gas = init_cost + push_cost * i;
-
         let db = InMemoryDB::default();
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(mload, result, Halt::StackUnderflow, expected_gas);
+        expect_halt!(mload, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i)));
     }

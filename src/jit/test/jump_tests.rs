@@ -89,14 +89,12 @@ fn operations_test_jump() {
 
 #[test]
 fn test_jump_underflow() {
-    let init_cost = gas::init_gas::<LatestSpec>(&[]);
-    let expected_gas = init_cost + gas::const_cost::<LatestSpec>(EvmOp::Jump);
     let db = InMemoryDB::default();
     let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 
     let ops = vec![EvmOp::Jump, EvmOp::Jumpdest];
     let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
-    expect_halt!(jump_underflow, result, Halt::StackUnderflow, expected_gas);
+    expect_halt!(jump_underflow, result, Halt::StackUnderflow);
 }
 
 #[test]
@@ -212,13 +210,7 @@ fn test_jumpi_underflow() {
     let ops = vec![EvmOp::Jumpi, EvmOp::Jumpdest];
     let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
 
-    let init_cost = gas::init_gas::<LatestSpec>(&[]);
-    let jumpi_cost = gas::const_cost::<LatestSpec>(EvmOp::Jumpi);
-    let mload_cost = gas::const_cost::<LatestSpec>(EvmOp::Mload);
-    let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
-
-    let expected_gas = init_cost + jumpi_cost;
-    expect_halt!(jumpi_underflow1, result, Halt::StackUnderflow, expected_gas);
+    expect_halt!(jumpi_underflow1, result, Halt::StackUnderflow);
 
     let db = InMemoryDB::default();
     let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
@@ -231,10 +223,7 @@ fn test_jumpi_underflow() {
     ];
     let result = test_jit(LatestSpec, ops, &mut execution_context).expect("Should return OK()");
 
-    let mem_gas = memory_gas_calc::<LatestSpec>(0x20);
-    let expected_gas = init_cost + push_cost + mload_cost + jumpi_cost + mem_gas;
-
-    expect_halt!(jumpi_underflow2, result, Halt::StackUnderflow, expected_gas);
+    expect_halt!(jumpi_underflow2, result, Halt::StackUnderflow);
 }
 
 #[test]

@@ -100,7 +100,7 @@ macro_rules! expect_success {
 //}
 
 macro_rules! expect_halt {
-    ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {
+    ($fname:ident, $result:ident, $reason:expr) => {
         let name_str = stringify!($fname);
 
         match $result {
@@ -111,7 +111,8 @@ macro_rules! expect_halt {
                     name_str, $reason, reason
                 );
                 assert_eq!(
-                    gas_used, $gas,
+                    gas_used,
+                    u64::MAX,
                     "expect_halt - {}: incorrect gas usage.",
                     name_str
                 );
@@ -134,7 +135,7 @@ macro_rules! expect_stack_overflow {
 
                 let mut ops = vec![Push(32, U256::ZERO); EVM_STACK_SIZE];
 
-                for i in 0..$stack_growth {
+                for _ in 0..$stack_growth {
                     ops.push($evmop);
 
                     let db = InMemoryDB::default();
@@ -142,10 +143,7 @@ macro_rules! expect_stack_overflow {
 
                     let result = test_jit(LatestSpec, ops.clone(), &mut ctx).expect("Contract build failed");
 
-                    let pushes = (EVM_STACK_SIZE - i) as u64;
-                    let expected_gas = init_cost + pushes * push_gas + op_cost;
-
-                    expect_halt!($fname, result, Halt::StackOverflow, expected_gas);
+                    expect_halt!($fname, result, Halt::StackOverflow);
 
                     ops.pop();
                     ops.pop();
@@ -183,14 +181,12 @@ macro_rules! expect_stack_underflow {
                     let mut cloned = ops.clone();
                     cloned.push($evmop);
 
-                    let expected_gas = init_cost + push_gas * i + op_cost;
-
                     let db = InMemoryDB::default();
 
                     let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
                     let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-                    expect_halt!($fname, result, Halt::StackUnderflow, expected_gas);
+                    expect_halt!($fname, result, Halt::StackUnderflow);
 
                     ops.push(Push(32, U256::from(i)));
                 }
@@ -367,19 +363,12 @@ fn operations_stack_underflow_sha3() {
         let mut cloned = ops.clone();
         cloned.push(Sha3);
 
-        let expected_gas = init_cost + push_gas * i;
-
         let db = InMemoryDB::default();
 
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(
-            stack_underflow_sha3,
-            result,
-            Halt::StackUnderflow,
-            expected_gas
-        );
+        expect_halt!(stack_underflow_sha3, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i)));
     }

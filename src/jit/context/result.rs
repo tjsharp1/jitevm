@@ -333,10 +333,7 @@ impl<'ctx> JitContractExecutionResult {
                 .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
 
         let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
-        let gas_used = ctx
-            .builder
-            .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
-        ctx.builder.build_store(gas_used_ptr, gas_used)?;
+        ctx.builder.build_store(gas_used_ptr, gas_limit)?;
 
         ctx.builder.build_return(None)?;
         Ok(())

@@ -1,10 +1,13 @@
 use inkwell::context::Context;
 use jitevm::code::{EvmCode, EvmOpParserMode};
-use jitevm::jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, Success};
+use jitevm::jit::{
+    contract::JitContractBuilder, ExecutionResult, Halt, JitEvmExecutionContext, Success,
+};
 use revm::{
     db::in_memory_db::BenchmarkDB,
     primitives::{
-        address, Bytecode, Bytes, Env, Eval, ExecutionResult as REVMExecutionResult, ResultAndState,
+        address, Bytecode, Bytes, Env, Eval, ExecutionResult as REVMExecutionResult,
+        Halt as REVMHalt, OutOfGasError, ResultAndState,
     },
     EVM,
 };
@@ -97,7 +100,64 @@ macro_rules! assert_evm_jit_equivalence {
                     "EVM and JIT refund not equivalent"
                 );
             }
-            _ => unimplemented!("Not implemented for error results!"),
+            REVMExecutionResult::Halt { reason, gas_used } => {
+                let ExecutionResult::Halt {
+                    reason: jit_reason,
+                    gas_used: jit_gas_used,
+                } = jit_result
+                else {
+                    panic!("JIT did not return halt when it should have!");
+                };
+
+                assert_eq!(gas_used, jit_gas_used, "EVM and JIT gas not equivalent!");
+
+                match reason {
+                    REVMHalt::OutOfGas(oog) => match oog {
+                        OutOfGasError::BasicOutOfGas => {
+                            assert_eq!(jit_reason, Halt::OutOfGasBasicOutOfGas)
+                        }
+                        OutOfGasError::MemoryLimit => {
+                            assert_eq!(jit_reason, Halt::OutOfGasMemoryLimit)
+                        }
+                        OutOfGasError::Memory => assert_eq!(jit_reason, Halt::OutOfGasMemory),
+                        OutOfGasError::Precompile => {
+                            assert_eq!(jit_reason, Halt::OutOfGasPrecompile)
+                        }
+                        OutOfGasError::InvalidOperand => {
+                            assert_eq!(jit_reason, Halt::OutOfGasInvalidOperand)
+                        }
+                    },
+                    REVMHalt::OpcodeNotFound => assert_eq!(jit_reason, Halt::OpcodeNotFound),
+                    REVMHalt::InvalidFEOpcode => assert_eq!(jit_reason, Halt::InvalidFEOpcode),
+                    REVMHalt::InvalidJump => assert_eq!(jit_reason, Halt::InvalidJump),
+                    REVMHalt::NotActivated => assert_eq!(jit_reason, Halt::NotActivated),
+                    REVMHalt::StackUnderflow => assert_eq!(jit_reason, Halt::StackUnderflow),
+                    REVMHalt::StackOverflow => assert_eq!(jit_reason, Halt::StackOverflow),
+                    REVMHalt::OutOfOffset => assert_eq!(jit_reason, Halt::OutOfOffset),
+                    REVMHalt::CreateCollision => assert_eq!(jit_reason, Halt::CreateCollision),
+                    REVMHalt::PrecompileError => assert_eq!(jit_reason, Halt::PrecompileError),
+                    REVMHalt::NonceOverflow => assert_eq!(jit_reason, Halt::NonceOverflow),
+                    REVMHalt::CreateContractSizeLimit => {
+                        assert_eq!(jit_reason, Halt::CreateContractSizeLimit)
+                    }
+                    REVMHalt::CreateContractStartingWithEF => {
+                        assert_eq!(jit_reason, Halt::CreateContractStartingWithEF)
+                    }
+                    REVMHalt::CreateInitcodeSizeLimit => {
+                        assert_eq!(jit_reason, Halt::CreateInitcodeSizeLimit)
+                    }
+                    REVMHalt::OverflowPayment => assert_eq!(jit_reason, Halt::OverflowPayment),
+                    REVMHalt::StateChangeDuringStaticCall => {
+                        assert_eq!(jit_reason, Halt::StateChangeDuringStaticCall)
+                    }
+                    REVMHalt::CallNotAllowedInsideStatic => {
+                        assert_eq!(jit_reason, Halt::CallNotAllowedInsideStatic)
+                    }
+                    REVMHalt::OutOfFund => assert_eq!(jit_reason, Halt::OutOfFund),
+                    REVMHalt::CallTooDeep => assert_eq!(jit_reason, Halt::CallTooDeep),
+                }
+            }
+            _ => unimplemented!("Not implemented for revert results!"),
         }
     };
 }
@@ -145,4 +205,9 @@ fn test_evm_and_jit_sload() {
 #[test]
 fn test_evm_and_jit_reth_random_stuff() {
     assert_evm_jit_equivalence!(reth_random_stuff);
+}
+
+#[test]
+fn test_evm_and_jit_snailtracer() {
+    assert_evm_jit_equivalence!(snailtracer);
 }

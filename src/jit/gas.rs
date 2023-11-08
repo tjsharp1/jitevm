@@ -54,7 +54,7 @@ macro_rules! build_sstore_gas_check {
         let book = $book.update_refund(refund);
         let book = book.update_gas(remaining);
 
-        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
@@ -111,7 +111,7 @@ macro_rules! build_sload_gas_check {
             .build_int_sub($book.gas_remaining, sub_gas, "deduct_gas")?;
         let book = $book.update_gas(remaining);
 
-        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
@@ -193,7 +193,7 @@ macro_rules! build_sha3_gas_check {
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
         let book = book.update_gas(remaining);
 
-        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
@@ -322,7 +322,7 @@ macro_rules! build_memory_gas_check {
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
         let book = book.update_gas(remaining);
 
-        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
@@ -381,7 +381,7 @@ macro_rules! build_gas_check {
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
         let book = book.update_gas(remaining);
 
-        let instruction_label = format!("{:?}_{}_enough_gas", $current.op(), $current.idx());
+        let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
@@ -454,7 +454,7 @@ macro_rules! build_gas_check_exp {
         let book = book.update_gas(remaining);
 
         let instruction_label = format!(
-            "{:?}_{}_enough_gas",
+            "{}_{}_enough_gas",
             $current
                 .block()
                 .block

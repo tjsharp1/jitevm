@@ -231,18 +231,11 @@ fn operations_underflow_exp() {
         let mut cloned = ops.clone();
         cloned.push(EvmOp::Exp);
 
-        let expected_gas = init_cost + push_gas * i;
-
         let db = InMemoryDB::default();
         let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
         let result = test_jit(LatestSpec, cloned, &mut ctx).expect("Contract build failed");
 
-        expect_halt!(
-            operations_underflow_exp,
-            result,
-            Halt::StackUnderflow,
-            expected_gas
-        );
+        expect_halt!(operations_underflow_exp, result, Halt::StackUnderflow);
 
         ops.push(Push(32, U256::from(i + 1)));
     }

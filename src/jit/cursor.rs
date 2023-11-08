@@ -228,7 +228,7 @@ impl<'ctx> InstructionCursor<'ctx> {
             } else {
                 instructions[i - 1].block
             };
-            let label = format!("{}_{:?}", i, code.code.ops[i]);
+            let label = format!("i{}", i);
             instructions.push(JitEvmEngineSimpleBlock::new(
                 &ctx,
                 block_before,

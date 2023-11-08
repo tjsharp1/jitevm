@@ -151,21 +151,13 @@ pub(crate) fn build_cmp_op<'a, 'ctx, SPEC: Spec>(
     let push_0 = JitEvmEngineSimpleBlock::new(
         ctx,
         this.block,
-        &format!(
-            "Instruction #{}: {:?} / push 0",
-            current.idx(),
-            current.op()
-        ),
+        &format!("i{}: {:?} / push 0", current.idx(), current.op()),
         &format!("_{}_0", current.idx()),
     )?;
     let push_1 = JitEvmEngineSimpleBlock::new(
         ctx,
         push_0.block,
-        &format!(
-            "Instruction #{}: {:?} / push 1",
-            current.idx(),
-            current.op()
-        ),
+        &format!("i{}: {:?} / push 1", current.idx(), current.op()),
         &format!("_{}_1", current.idx()),
     )?;
 
@@ -208,7 +200,7 @@ pub(crate) fn build_signextend_op<'a, 'ctx, SPEC: Spec>(
         .builder
         .build_int_compare(IntPredicate::UGE, x, const_32, "")?;
 
-    let label = format!("Instruction #{}: Signextend / else", current.idx());
+    let label = format!("i{}: Signextend / else", current.idx());
     let index = format!("_{}", current.idx());
     let else_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &label, &index)?;
     ctx.builder.position_at_end(this.block);
