@@ -5,10 +5,7 @@ use inkwell::context::Context;
 use jitevm::{
     code::{EvmCode, EvmOpParserMode},
     db::StateProviderDatabase,
-    jit::{
-        contract::JitContractBuilder, gas, ExecutionResult, JitEvmEngineError,
-        JitEvmExecutionContext, Success, TransactionConfig,
-    },
+    jit::{contract::JitContractBuilder, JitEvmExecutionContext, TransactionConfig},
 };
 use reth::dirs::{DataDirPath, MaybePlatformPath};
 use reth_db::open_db_read_only;

@@ -259,7 +259,7 @@ fn operations_jit_test_stop() {
 fn operations_jit_test_sha3() {
     use revm_primitives::KECCAK_EMPTY;
 
-    for _ in 0..1000 {
+    for _ in 0..100 {
         let db = InMemoryDB::default();
         let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
 

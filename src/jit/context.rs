@@ -209,7 +209,7 @@ impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
             transaction_context,
             calldata,
             evm_state,
-            spec: self.spec,
+            _data: Default::default(),
         }
     }
 }
@@ -222,7 +222,7 @@ pub struct JitEvmExecutionContext<SPEC: Spec> {
     transaction_context: TransactionContext,
     calldata: Bytes,
     evm_state: EVMState,
-    spec: SPEC,
+    _data: std::marker::PhantomData<SPEC>,
 }
 
 impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {

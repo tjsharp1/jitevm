@@ -18,7 +18,6 @@ use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
 use inkwell::targets::{InitializationConfig, Target};
 use inkwell::values::{IntValue, PhiValue};
-use inkwell::IntPredicate;
 use inkwell::OptimizationLevel;
 use revm_primitives::Spec;
 
@@ -77,7 +76,6 @@ pub struct JitEvmEngineSimpleBlock<'ctx> {
     pub phi_mem: PhiValue<'ctx>,
     pub phi_mem_size: PhiValue<'ctx>,
     pub phi_mem_gas: PhiValue<'ctx>,
-    pub phi_error: Option<PhiValue<'ctx>>,
 }
 
 impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
@@ -128,24 +126,7 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
             phi_mem,
             phi_mem_size,
             phi_mem_gas,
-            phi_error: None,
         })
-    }
-
-    pub fn error_block(
-        ctx: &BuilderContext<'ctx>,
-        block_before: BasicBlock<'ctx>,
-        name: &str,
-        suffix: &str,
-    ) -> Result<Self, JitEvmEngineError> {
-        let mut block = Self::new(ctx, block_before, name, suffix)?;
-
-        block.phi_error = Some(
-            ctx.builder
-                .build_phi(ctx.types.type_i32, &format!("error{}", suffix))?,
-        );
-
-        Ok(block)
     }
 
     pub fn book(&self) -> JitEvmEngineBookkeeping<'ctx> {

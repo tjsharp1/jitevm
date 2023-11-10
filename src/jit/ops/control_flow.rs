@@ -79,9 +79,6 @@ pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
             .build_unconditional_branch(jump_table[0].block)?;
         jump_table[0].add_incoming(&book, this);
 
-        let invalid_jump = u32::from(JitContractResultCode::InvalidJump);
-        let invalid_jump = ctx.types.type_i32.const_int(invalid_jump as u64, false);
-
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
@@ -94,13 +91,29 @@ pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
                 "",
             )?;
             if j + 1 == code.jumpdests.len() {
+                let error_label = format!("instruction #{}: error", current.idx());
+                let error_idx = format!("i#{}_{}", current.idx(), j);
+                let error_block = JitEvmEngineSimpleBlock::new(
+                    &ctx,
+                    jump_table[j].block,
+                    &error_label,
+                    &error_idx,
+                )?;
+
+                ctx.builder.position_at_end(jump_table[j].block);
                 ctx.builder.build_conditional_branch(
                     cmp,
                     instructions[*jmp_i].block,
-                    current.error_block(),
+                    error_block.block,
                 )?;
                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                current.incoming_error(&book, &jump_table[j], invalid_jump);
+                error_block.add_incoming(&book, &jump_table[j]);
+                ctx.builder.position_at_end(error_block.block);
+                JitContractExecutionResult::build_exit_halt(
+                    &ctx,
+                    &error_block,
+                    JitContractResultCode::InvalidJump,
+                )?;
             } else {
                 ctx.builder.build_conditional_branch(
                     cmp,
@@ -168,8 +181,6 @@ pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
         next.add_incoming(&book, this);
         jump_table[0].add_incoming(&book, this);
 
-        let invalid_jump = u32::from(JitContractResultCode::InvalidJump);
-        let invalid_jump = ctx.types.type_i32.const_int(invalid_jump as u64, false);
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
@@ -182,13 +193,30 @@ pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
                 "",
             )?;
             if j + 1 == code.jumpdests.len() {
+                let error_label = format!("instruction #{}: error", current.idx());
+                let error_idx = format!("i#{}_{}", current.idx(), j);
+                let error_block = JitEvmEngineSimpleBlock::new(
+                    &ctx,
+                    jump_table[j].block,
+                    &error_label,
+                    &error_idx,
+                )?;
+
+                ctx.builder.position_at_end(jump_table[j].block);
                 ctx.builder.build_conditional_branch(
                     cmp,
                     instructions[*jmp_i].block,
-                    current.error_block(),
+                    error_block.block,
                 )?;
+
                 instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                current.incoming_error(&book, &jump_table[j], invalid_jump);
+                error_block.add_incoming(&book, &jump_table[j]);
+                ctx.builder.position_at_end(error_block.block);
+                JitContractExecutionResult::build_exit_halt(
+                    &ctx,
+                    &error_block,
+                    JitContractResultCode::InvalidJump,
+                )?;
             } else {
                 ctx.builder.build_conditional_branch(
                     cmp,

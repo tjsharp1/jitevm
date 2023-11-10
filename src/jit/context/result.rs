@@ -299,6 +299,7 @@ impl<'ctx> JitContractExecutionResult {
     pub fn build_exit_halt(
         ctx: &BuilderContext<'ctx>,
         block: &JitEvmEngineSimpleBlock<'ctx>,
+        code: JitContractResultCode,
     ) -> Result<(), JitEvmEngineError> {
         let book = block.book();
 
@@ -320,12 +321,8 @@ impl<'ctx> JitContractExecutionResult {
             "result_code_offset",
         )?;
 
-        // TODO: JitEvmEngineError for this?
-        let error_code = block
-            .phi_error
-            .expect("Should be an error block")
-            .as_basic_value()
-            .into_int_value();
+        let result = u32::from(code);
+        let error_code = ctx.types.type_i32.const_int(result as u64, false);
         ctx.builder.build_store(result_code_ptr, error_code)?;
 
         let gas_used_ptr =

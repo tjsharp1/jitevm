@@ -4,7 +4,6 @@ use crate::jit::{
     EvmOp, IndexedEvmCode, JitEvmEngineError, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
 };
 use inkwell::AddressSpace;
-use inkwell::{basic_block::BasicBlock, values::IntValue};
 
 pub trait LendingIteratorLifetime<'this, ImplicitBounds: Sealed = Bounds<&'this Self>> {
     type Item;
@@ -73,24 +72,6 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
     pub fn instructions(&self) -> &Vec<JitEvmEngineSimpleBlock<'ctx>> {
         &self.render.instructions
     }
-
-    pub fn incoming_error(
-        &self,
-        book: &JitEvmEngineBookkeeping<'ctx>,
-        block: &JitEvmEngineSimpleBlock<'ctx>,
-        code: IntValue<'ctx>,
-    ) {
-        self.render.error_block.add_incoming(book, block);
-        self.render
-            .error_block
-            .phi_error
-            .expect("Should only be called on an error block.")
-            .add_incoming(&[(&code, block.block)]);
-    }
-
-    pub fn error_block(&self) -> BasicBlock<'ctx> {
-        self.render.error_block.block
-    }
 }
 
 pub(crate) struct Iter<'a, 'ctx> {
@@ -134,7 +115,6 @@ pub(crate) struct InstructionCursor<'ctx> {
     code: IndexedEvmCode,
     instructions: Vec<JitEvmEngineSimpleBlock<'ctx>>,
     end_block: JitEvmEngineSimpleBlock<'ctx>,
-    error_block: JitEvmEngineSimpleBlock<'ctx>,
 }
 
 impl<'ctx> InstructionCursor<'ctx> {
@@ -253,21 +233,10 @@ impl<'ctx> InstructionCursor<'ctx> {
             JitContractResultCode::SuccessStop,
         )?;
 
-        // ERROR-JUMPDEST HANDLER
-
-        let error_block = JitEvmEngineSimpleBlock::error_block(
-            &ctx,
-            end_block.block,
-            &"error-jumpdest",
-            &"-error-jumpdest",
-        )?;
-        JitContractExecutionResult::build_exit_halt(&ctx, &error_block)?;
-
         Ok(InstructionCursor {
             code,
             instructions,
             end_block,
-            error_block,
         })
     }
 

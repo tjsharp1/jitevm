@@ -9,7 +9,10 @@ const INIT_TX_COST: u64 = 21000;
 
 macro_rules! build_sstore_gas_check {
     ($ctx:ident, $current:ident, $book:ident, $gas_cost:ident, $refund:ident) => {
-        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use crate::jit::{
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
@@ -59,15 +62,24 @@ macro_rules! build_sstore_gas_check {
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
+        let instruction_label = format!("i{}_error", $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let error_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        let oog = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
-        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
-        $current.incoming_error(&book, $current.block(), result_code);
+        next_block.add_incoming(&book, $current.block());
+        error_block.add_incoming(&book, $current.block());
+
+        $ctx.builder.position_at_end(error_block.block);
+        JitContractExecutionResult::build_exit_halt(
+            $ctx,
+            &error_block,
+            JitContractResultCode::OutOfGasBasicOutOfGas,
+        )?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
         $current.update_current_block(next_block);
@@ -76,7 +88,10 @@ macro_rules! build_sstore_gas_check {
 
 macro_rules! build_sload_gas_check {
     ($ctx:ident, $current:ident, $book:ident, $gas_cost:ident) => {
-        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use crate::jit::{
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
@@ -116,15 +131,24 @@ macro_rules! build_sload_gas_check {
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
+        let instruction_label = format!("i{}_error", $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let error_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        let oog = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
-        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
-        $current.incoming_error(&book, $current.block(), result_code);
+        next_block.add_incoming(&book, $current.block());
+        error_block.add_incoming(&book, $current.block());
+
+        $ctx.builder.position_at_end(error_block.block);
+        JitContractExecutionResult::build_exit_halt(
+            $ctx,
+            &error_block,
+            JitContractResultCode::OutOfGasBasicOutOfGas,
+        )?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
         $current.update_current_block(next_block);
@@ -133,7 +157,10 @@ macro_rules! build_sload_gas_check {
 
 macro_rules! build_sha3_gas_check {
     ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {
-        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use crate::jit::{
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let (book, expansion_cost) = memory_expansion_cost!($ctx, $current, $book, $offset, $len);
@@ -198,15 +225,24 @@ macro_rules! build_sha3_gas_check {
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
+        let instruction_label = format!("i{}_error", $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let error_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        let oog = u32::from(JitContractResultCode::OutOfGasMemory);
-        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
-        $current.incoming_error(&book, $current.block(), result_code);
+        next_block.add_incoming(&book, $current.block());
+        error_block.add_incoming(&book, $current.block());
+
+        $ctx.builder.position_at_end(error_block.block);
+        JitContractExecutionResult::build_exit_halt(
+            $ctx,
+            &error_block,
+            JitContractResultCode::OutOfGasMemory,
+        )?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
         $current.update_current_block(next_block);
@@ -284,7 +320,10 @@ macro_rules! build_memory_gas_check {
         build_memory_gas_check!($ctx, $current, $book, $offset, len);
     };
     ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {
-        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use crate::jit::{
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let const_true = $ctx.types.type_bool.const_int(1, false);
@@ -327,15 +366,24 @@ macro_rules! build_memory_gas_check {
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
+        let instruction_label = format!("i{}_error", $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let error_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        let oog = u32::from(JitContractResultCode::OutOfGasMemory);
-        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
-        $current.incoming_error(&book, $current.block(), result_code);
+        next_block.add_incoming(&book, $current.block());
+        error_block.add_incoming(&book, $current.block());
+
+        $ctx.builder.position_at_end(error_block.block);
+        JitContractExecutionResult::build_exit_halt(
+            $ctx,
+            &error_block,
+            JitContractResultCode::OutOfGasMemory,
+        )?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
         $current.update_current_block(next_block);
@@ -344,7 +392,10 @@ macro_rules! build_memory_gas_check {
 
 macro_rules! build_gas_check {
     ($ctx:ident, $current:ident) => {
-        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use crate::jit::{
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
@@ -386,15 +437,24 @@ macro_rules! build_gas_check {
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
+        let instruction_label = format!("i{}_error", $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let error_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        let oog = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
-        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
-        $current.incoming_error(&book, $current.block(), result_code);
+        next_block.add_incoming(&book, $current.block());
+        error_block.add_incoming(&book, $current.block());
+
+        $ctx.builder.position_at_end(error_block.block);
+        JitContractExecutionResult::build_exit_halt(
+            $ctx,
+            &error_block,
+            JitContractResultCode::OutOfGasBasicOutOfGas,
+        )?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
         $current.update_current_block(next_block);
@@ -407,7 +467,10 @@ macro_rules! build_gas_check_exp {
         build_gas_check_exp!($ctx, $current, const_zero);
     };
     ($ctx:ident, $current:ident, $exp:ident) => {{
-        use crate::jit::{context::JitContractResultCode, contract::JitEvmEngineSimpleBlock};
+        use crate::jit::{
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
+        };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
         let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
@@ -453,29 +516,36 @@ macro_rules! build_gas_check_exp {
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
         let book = book.update_gas(remaining);
 
-        let instruction_label = format!(
-            "{}_{}_enough_gas",
-            $current
-                .block()
-                .block
-                .get_name()
-                .to_str()
-                .expect("Block has a name"),
-            $current.idx()
-        );
+        let block_name = $current
+            .block()
+            .block
+            .get_name()
+            .to_str()
+            .expect("Block has a name");
+
+        let instruction_label = format!("{}_{}_enough_gas", block_name, $current.idx());
         let idx = format!("_{}", $current.idx());
         let next_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
+        let instruction_label = format!("{}_{}_error", block_name, $current.idx());
+        let idx = format!("_{}", $current.idx());
+        let error_block =
+            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        let oog = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
-        let result_code = $ctx.types.type_i32.const_int(oog as u64, false);
-        $current.incoming_error(&book, $current.block(), result_code);
+        next_block.add_incoming(&book, $current.block());
+        error_block.add_incoming(&book, $current.block());
+
+        $ctx.builder.position_at_end(error_block.block);
+        JitContractExecutionResult::build_exit_halt(
+            $ctx,
+            &error_block,
+            JitContractResultCode::OutOfGasBasicOutOfGas,
+        )?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
         $current.update_current_block(next_block);

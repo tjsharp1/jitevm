@@ -52,7 +52,8 @@ macro_rules! build_stack_check {
     }};
     ($ctx:expr, $current:ident, $min_stack:ident, $growth:literal) => {{
         use crate::jit::{
-            context::JitContractResultCode, contract::JitEvmEngineSimpleBlock,
+            context::{JitContractExecutionResult, JitContractResultCode},
+            contract::JitEvmEngineSimpleBlock,
             EVM_STACK_ELEMENT_SIZE,
         };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
@@ -86,11 +87,24 @@ macro_rules! build_stack_check {
                 &idx,
             )?;
 
-            next_block.add_incoming(&book, $current.block());
+            let instruction_label = format!("i{}_error", $current.idx());
+            let idx = format!("_{}", $current.idx());
+            let error_block = JitEvmEngineSimpleBlock::new(
+                $ctx,
+                $current.block().block,
+                &instruction_label,
+                &idx,
+            )?;
 
-            let underflow = u32::from(JitContractResultCode::StackUnderflow);
-            let result_code = $ctx.types.type_i32.const_int(underflow as u64, false);
-            $current.incoming_error(&book, $current.block(), result_code);
+            next_block.add_incoming(&book, $current.block());
+            error_block.add_incoming(&book, $current.block());
+
+            $ctx.builder.position_at_end(error_block.block);
+            JitContractExecutionResult::build_exit_halt(
+                $ctx,
+                &error_block,
+                JitContractResultCode::StackUnderflow,
+            )?;
 
             $ctx.builder.position_at_end($current.block().block);
             let cmp = $ctx
@@ -101,7 +115,7 @@ macro_rules! build_stack_check {
                 .ok_or(JitEvmEngineError::NoInstructionValue)?
                 .into_int_value();
             $ctx.builder
-                .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+                .build_conditional_branch(cmp, next_block.block, error_block.block)?;
             $ctx.builder.position_at_end(next_block.block);
 
             $current.update_current_block(next_block);
@@ -127,11 +141,24 @@ macro_rules! build_stack_check {
                 &idx,
             )?;
 
-            next_block.add_incoming(&book, $current.block());
+            let instruction_label = format!("i{}_error", $current.idx());
+            let idx = format!("_{}", $current.idx());
+            let error_block = JitEvmEngineSimpleBlock::new(
+                $ctx,
+                $current.block().block,
+                &instruction_label,
+                &idx,
+            )?;
 
-            let overflow = u32::from(JitContractResultCode::StackOverflow);
-            let result_code = $ctx.types.type_i32.const_int(overflow as u64, false);
-            $current.incoming_error(&book, $current.block(), result_code);
+            next_block.add_incoming(&book, $current.block());
+            error_block.add_incoming(&book, $current.block());
+
+            $ctx.builder.position_at_end(error_block.block);
+            JitContractExecutionResult::build_exit_halt(
+                $ctx,
+                &error_block,
+                JitContractResultCode::StackOverflow,
+            )?;
 
             $ctx.builder.position_at_end($current.block().block);
             let cmp = $ctx
@@ -142,7 +169,7 @@ macro_rules! build_stack_check {
                 .ok_or(JitEvmEngineError::NoInstructionValue)?
                 .into_int_value();
             $ctx.builder
-                .build_conditional_branch(cmp, next_block.block, $current.error_block())?;
+                .build_conditional_branch(cmp, next_block.block, error_block.block)?;
             $ctx.builder.position_at_end(next_block.block);
 
             $current.update_current_block(next_block);

@@ -16,7 +16,8 @@ fn operations_jit_test_sstore_refunds() {
         db.insert_account_info(address, Default::default());
 
         for (idx, v) in values.iter().enumerate() {
-            db.insert_account_storage(address, U256::from(idx), *v);
+            db.insert_account_storage(address, U256::from(idx), *v)
+                .expect("Failed insertion");
         }
         db
     }
