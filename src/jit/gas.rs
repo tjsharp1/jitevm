@@ -531,7 +531,7 @@ fn sstore_refund<SPEC: Spec>(original: U256, current: U256, new: U256, warm: boo
             0
         } else {
             if current == original {
-                if original == U256::ZERO && new == U256::ZERO {
+                if original != U256::ZERO && new == U256::ZERO {
                     4800
                 } else {
                     0
