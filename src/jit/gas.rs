@@ -743,6 +743,8 @@ pub fn const_cost<SPEC: Spec>(op: EvmOp) -> u64 {
         EvmOp::Codesize => 2,
         EvmOp::Caller => 2,
         EvmOp::Origin => 2,
+        EvmOp::Return => 0,
+        EvmOp::Revert => 0,
         EvmOp::AugmentedPushJumpi(_, _) => 13,
         EvmOp::AugmentedPushJump(_, _) => 11,
         _ => unimplemented!("Gas cost for {:?} unimplemented!", op),

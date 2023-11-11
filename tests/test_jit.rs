@@ -83,6 +83,7 @@ macro_rules! assert_evm_jit_equivalence {
                     reason: jit_reason,
                     gas_used: jit_gas,
                     gas_refunded: jit_refund,
+                    output: jit_output,
                 } = jit_result
                 else {
                     panic!("JIT did not return success when it should have!");
@@ -99,6 +100,7 @@ macro_rules! assert_evm_jit_equivalence {
                     gas_refunded, jit_refund,
                     "EVM and JIT refund not equivalent"
                 );
+                todo!("HANDLE JIT OUTPUT");
             }
             REVMExecutionResult::Halt { reason, gas_used } => {
                 let ExecutionResult::Halt {

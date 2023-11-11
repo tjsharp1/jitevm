@@ -22,7 +22,9 @@ mod arithmetic_tests;
 mod context_tests;
 mod jump_tests;
 mod memory_tests;
+mod misc_tests;
 mod stack_tests;
+mod state_tests;
 mod storage_tests;
 
 fn test_jit<SPEC: Spec>(
@@ -51,11 +53,20 @@ fn memory_gas_calc<SPEC: Spec>(offset: u64) -> u64 {
 }
 
 macro_rules! expect_success {
-    ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {{
+        use bytes::Bytes;
+
         let refund = 0;
-        expect_success!($fname, $result, $reason, $gas, refund);
-    };
-    ($fname:ident, $result:ident, $reason:expr, $gas:ident, $refund:ident) => {
+        let output = Bytes::new();
+        expect_success!($fname, $result, $reason, $gas, refund, output);
+    }};
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident, $refund:ident) => {{
+        use bytes::Bytes;
+
+        let output = Bytes::new();
+        expect_success!($fname, $result, $reason, $gas, $refund, output);
+    }};
+    ($fname:ident, $result:ident, $reason:expr, $gas:ident, $refund:ident, $output:ident) => {{
         let name_str = stringify!($fname);
 
         match $result {
@@ -63,6 +74,7 @@ macro_rules! expect_success {
                 reason,
                 gas_used,
                 gas_refunded,
+                output,
             } => {
                 assert_eq!(
                     reason, $reason,
@@ -79,25 +91,41 @@ macro_rules! expect_success {
                     "expect_success - {}: incorrect gas refund.",
                     name_str
                 );
+                assert_eq!(
+                    output, $output,
+                    "expect_success = {}: incorrect output.",
+                    name_str
+                );
             }
             o => panic!(
                 "expect_success - {}: Expected success, got: {:?}",
                 name_str, o
             ),
         }
-    };
+    }};
 }
 
-//macro_rules! expect_revert {
-//    ($fname:ident, $result:ident) => {
-//        let name_str = stringify!($fname);
-//
-//        match $result {
-//            ExecutionResult::Revert => {}
-//            o => panic!("{}: Expected revert, got: {:?}", name_str, o),
-//        }
-//    };
-//}
+macro_rules! expect_revert {
+    ($fname:ident, $result:ident, $gas:ident, $output:ident) => {
+        let name_str = stringify!($fname);
+
+        match $result {
+            ExecutionResult::Revert { gas_used, output } => {
+                assert_eq!(
+                    gas_used, $gas,
+                    "expect_revert - {}: incorrect gas usage.",
+                    name_str
+                );
+                assert_eq!(
+                    output, $output,
+                    "expect_revert - {}: incorrect output.",
+                    name_str
+                );
+            }
+            o => panic!("{}: Expected revert, got: {:?}", name_str, o),
+        }
+    };
+}
 
 macro_rules! expect_halt {
     ($fname:ident, $result:ident, $reason:expr) => {
@@ -205,6 +233,7 @@ macro_rules! expect_stack_underflow {
 }
 
 pub(crate) use expect_halt;
+pub(crate) use expect_revert;
 pub(crate) use expect_stack_overflow;
 pub(crate) use expect_stack_underflow;
 pub(crate) use expect_success;
@@ -416,11 +445,8 @@ fn operations_stack_underflow_sha3() {
 //Create,
 //Call,
 //CallCode,
-//Return,
 //DelegateCall,
 //Create2,
 //StaticCall,
 //Jumpdest,
-//Revert,
-//Invalid,
 //Selfdestruct,

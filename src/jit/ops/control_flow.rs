@@ -14,11 +14,10 @@ pub(crate) fn build_stop_op<'a, 'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
     current: &mut CurrentInstruction<'a, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    JitContractExecutionResult::build_exit_success(
-        &ctx,
-        current.block(),
-        JitContractResultCode::SuccessStop,
-    )?;
+    let block = current.block();
+
+    JitContractExecutionResult::build_exit_stop(&ctx, block)?;
+
     Ok(())
 }
 

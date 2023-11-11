@@ -4,7 +4,9 @@ use crate::jit::{
     JitEvmEngineError,
 };
 use bytes::Bytes;
-use inkwell::{context::Context, targets::TargetData, types::StructType, AddressSpace};
+use inkwell::{
+    context::Context, targets::TargetData, types::StructType, values::IntValue, AddressSpace,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Success {
@@ -96,7 +98,7 @@ pub enum ExecutionResult {
         gas_used: u64,
         gas_refunded: u64,
         //logs: Vec<Log>,
-        //output: Output,
+        output: Bytes,
     },
     /// Reverted by `REVERT` opcode that doesn't spend all gas.
     Revert { gas_used: u64, output: Bytes },
@@ -114,6 +116,8 @@ impl From<JitContractExecutionResult> for ExecutionResult {
             result_code,
             gas_used,
             gas_refunded,
+            return_ptr,
+            return_len,
         } = result;
 
         let code = JitContractResultCode::from(result_code);
@@ -121,19 +125,32 @@ impl From<JitContractExecutionResult> for ExecutionResult {
         if code.is_success() {
             let reason = code.into();
 
-            // TODO: need to handle transferring the refund amount.
+            let output = if return_len == 0 {
+                Bytes::new()
+            } else {
+                // SAFETY: memory for JIT sub-context this result came from must still be live.
+                let ptr = return_ptr as *const u8;
+                let slice = unsafe { std::slice::from_raw_parts(ptr, return_len) };
+                Bytes::copy_from_slice(slice)
+            };
 
             ExecutionResult::Success {
                 reason,
                 gas_used: gas_used - gas_refunded,
                 gas_refunded,
+                output,
             }
         } else if code.is_revert() {
-            // TODO: revert instruction...
-            ExecutionResult::Revert {
-                gas_used,
-                output: Bytes::new(),
-            }
+            let output = if return_len == 0 {
+                Bytes::new()
+            } else {
+                // SAFETY: memory for JIT sub-context this result came from must still be live.
+                let ptr = return_ptr as *const u8;
+                let slice = unsafe { std::slice::from_raw_parts(ptr, return_len) };
+                Bytes::copy_from_slice(slice)
+            };
+
+            ExecutionResult::Revert { gas_used, output }
         } else {
             let reason = code.into();
 
@@ -142,12 +159,12 @@ impl From<JitContractExecutionResult> for ExecutionResult {
     }
 }
 
+// TODO: handle all the below return codes...
 #[derive(Debug, PartialEq)]
 pub(crate) enum JitContractResultCode {
     SuccessStop,
     SuccessReturn,
     SuccessSelfDestruct,
-    // TODO: handle the below return codes...
     Revert,
     OutOfGasBasicOutOfGas,
     OutOfGasMemoryLimit,
@@ -268,6 +285,8 @@ pub(crate) struct JitContractExecutionResult {
     result_code: u32,
     gas_used: u64,
     gas_refunded: u64,
+    return_ptr: usize,
+    return_len: usize,
     // TODO: finish the below, revert will have output as well, all remaining will have gas_used
     // logs: Vec<Log>,
     // output: Output::Call(Bytes) or Output::Create(Bytes, Option<Address>)
@@ -279,19 +298,24 @@ impl JitContractExecutionResult {
             result_code: 0,
             gas_used: 0,
             gas_refunded: 0,
+            return_ptr: 0,
+            return_len: 0,
         }
     }
 }
 
 impl<'ctx> JitContractExecutionResult {
-    pub fn llvm_struct_type(ctx: &'ctx Context, _: &TargetData) -> StructType<'ctx> {
+    pub fn llvm_struct_type(ctx: &'ctx Context, target: &TargetData) -> StructType<'ctx> {
         let type_i32 = ctx.i32_type();
         let type_i64 = ctx.i64_type();
+        let type_ptr = ctx.ptr_sized_int_type(target, None);
 
         let fields = vec![
             type_i32.into(), // result_code
             type_i64.into(), // gas_used
             type_i64.into(), // gas_refunded
+            type_ptr.into(), // return ptr
+            type_i64.into(), // return data len
         ];
         ctx.struct_type(&fields, false)
     }
@@ -336,10 +360,11 @@ impl<'ctx> JitContractExecutionResult {
         Ok(())
     }
 
-    pub fn build_exit_success(
+    pub fn build_exit_return(
         ctx: &BuilderContext<'ctx>,
         block: &JitEvmEngineSimpleBlock<'ctx>,
-        code: JitContractResultCode,
+        offset: IntValue<'ctx>,
+        size: IntValue<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
         let book = block.book();
 
@@ -361,6 +386,7 @@ impl<'ctx> JitContractExecutionResult {
             "result_code_offset",
         )?;
 
+        let code = JitContractResultCode::SuccessReturn;
         let code = ctx.types.type_i32.const_int(u32::from(code) as u64, false);
         ctx.builder.build_store(result_code, code)?;
 
@@ -381,6 +407,146 @@ impl<'ctx> JitContractExecutionResult {
             "gas_refund_offset",
         )?;
         ctx.builder.build_store(gas_refund_ptr, book.gas_refund)?;
+
+        let return_data_ptr = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            3,
+            "return_ptr_offset",
+        )?;
+
+        let offset = ctx.builder.build_int_cast(offset, ctx.types.type_i64, "")?;
+        let return_data = ctx
+            .builder
+            .build_int_add(book.mem, offset, "return_data_mem")?;
+        ctx.builder.build_store(return_data_ptr, return_data)?;
+
+        let return_len_ptr = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            4,
+            "return_len_offset",
+        )?;
+        ctx.builder.build_store(return_len_ptr, size)?;
+
+        // TODO: push-1 on the calling stack?
+
+        ctx.builder.build_return(None)?;
+        Ok(())
+    }
+
+    pub fn build_exit_stop(
+        ctx: &BuilderContext<'ctx>,
+        block: &JitEvmEngineSimpleBlock<'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = block.book();
+
+        let function = ctx
+            .module
+            .get_function("executecontract")
+            .expect("Function should be there");
+        let execution_result = function.get_nth_param(1).unwrap().into_int_value();
+        let ptr = ctx.builder.build_int_to_ptr(
+            execution_result,
+            ctx.types.execution_result.ptr_type(AddressSpace::default()),
+            "ctx_ptr",
+        )?;
+
+        let result_code = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            0,
+            "result_code_offset",
+        )?;
+
+        let code = JitContractResultCode::SuccessStop;
+        let code = ctx.types.type_i32.const_int(u32::from(code) as u64, false);
+        ctx.builder.build_store(result_code, code)?;
+
+        let gas_used_ptr =
+            ctx.builder
+                .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
+
+        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_used = ctx
+            .builder
+            .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
+        ctx.builder.build_store(gas_used_ptr, gas_used)?;
+
+        let gas_refund_ptr = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            2,
+            "gas_refund_offset",
+        )?;
+        ctx.builder.build_store(gas_refund_ptr, book.gas_refund)?;
+
+        ctx.builder.build_return(None)?;
+        Ok(())
+    }
+
+    pub fn build_exit_revert(
+        ctx: &BuilderContext<'ctx>,
+        block: &JitEvmEngineSimpleBlock<'ctx>,
+        offset: IntValue<'ctx>,
+        size: IntValue<'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        let book = block.book();
+
+        let function = ctx
+            .module
+            .get_function("executecontract")
+            .expect("Function should be there");
+        let execution_result = function.get_nth_param(1).unwrap().into_int_value();
+        let ptr = ctx.builder.build_int_to_ptr(
+            execution_result,
+            ctx.types.execution_result.ptr_type(AddressSpace::default()),
+            "ctx_ptr",
+        )?;
+
+        let result_code = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            0,
+            "result_code_offset",
+        )?;
+
+        let code = JitContractResultCode::Revert;
+        let code = ctx.types.type_i32.const_int(u32::from(code) as u64, false);
+        ctx.builder.build_store(result_code, code)?;
+
+        let gas_used_ptr =
+            ctx.builder
+                .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
+
+        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_used = ctx
+            .builder
+            .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
+        ctx.builder.build_store(gas_used_ptr, gas_used)?;
+
+        let return_data_ptr = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            3,
+            "return_ptr_offset",
+        )?;
+
+        let offset = ctx.builder.build_int_cast(offset, ctx.types.type_i64, "")?;
+        let return_data = ctx
+            .builder
+            .build_int_add(book.mem, offset, "return_data_mem")?;
+        ctx.builder.build_store(return_data_ptr, return_data)?;
+
+        let return_len_ptr = ctx.builder.build_struct_gep(
+            ctx.types.execution_result,
+            ptr,
+            4,
+            "return_len_offset",
+        )?;
+        ctx.builder.build_store(return_len_ptr, size)?;
+
+        // TODO: push-0 on the calling stack?
 
         ctx.builder.build_return(None)?;
         Ok(())

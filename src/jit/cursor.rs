@@ -227,11 +227,7 @@ impl<'ctx> InstructionCursor<'ctx> {
         let end_block =
             JitEvmEngineSimpleBlock::new(&ctx, instructions[ops_len - 1].block, &"end", &"-end")?;
 
-        JitContractExecutionResult::build_exit_success(
-            &ctx,
-            &end_block,
-            JitContractResultCode::SuccessStop,
-        )?;
+        JitContractExecutionResult::build_exit_stop(&ctx, &end_block)?;
 
         Ok(InstructionCursor {
             code,
