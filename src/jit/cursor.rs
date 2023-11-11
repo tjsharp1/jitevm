@@ -1,5 +1,5 @@
 use crate::jit::{
-    context::{JitContractExecutionResult, JitContractResultCode, TransactionContext},
+    context::{JitContractExecutionResult, TransactionContext},
     contract::{BuilderContext, JitEvmEngineBookkeeping, JitEvmEngineSimpleBlock},
     EvmOp, IndexedEvmCode, JitEvmEngineError, EVM_STACK_ELEMENT_SIZE, EVM_STACK_SIZE,
 };

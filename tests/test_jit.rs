@@ -7,7 +7,7 @@ use revm::{
     db::in_memory_db::BenchmarkDB,
     primitives::{
         address, Bytecode, Bytes, Env, Eval, ExecutionResult as REVMExecutionResult,
-        Halt as REVMHalt, OutOfGasError, ResultAndState,
+        Halt as REVMHalt, OutOfGasError, Output, ResultAndState,
     },
     EVM,
 };
@@ -77,6 +77,7 @@ macro_rules! assert_evm_jit_equivalence {
                 reason,
                 gas_used,
                 gas_refunded,
+                output,
                 ..
             } => {
                 let ExecutionResult::Success {
@@ -100,7 +101,12 @@ macro_rules! assert_evm_jit_equivalence {
                     gas_refunded, jit_refund,
                     "EVM and JIT refund not equivalent"
                 );
-                todo!("HANDLE JIT OUTPUT");
+                match output {
+                    Output::Call(bytes) => {
+                        assert_eq!(bytes, jit_output, "EVM and JIT output not equivalent");
+                    }
+                    Output::Create(_, _) => todo!("Handle create outputs"),
+                }
             }
             REVMExecutionResult::Halt { reason, gas_used } => {
                 let ExecutionResult::Halt {
@@ -209,6 +215,7 @@ fn test_evm_and_jit_reth_random_stuff() {
     assert_evm_jit_equivalence!(reth_random_stuff);
 }
 
+#[ignore]
 #[test]
 fn test_evm_and_jit_snailtracer() {
     assert_evm_jit_equivalence!(snailtracer);

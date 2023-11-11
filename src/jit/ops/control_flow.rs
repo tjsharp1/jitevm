@@ -1,6 +1,5 @@
 use crate::jit::ops::stack::{build_stack_check, build_stack_pop};
 use crate::jit::{
-    context::JitContractResultCode,
     contract::BuilderContext,
     cursor::CurrentInstruction,
     gas::{build_gas_check, const_cost},

@@ -195,9 +195,8 @@ impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
         &self,
         context: &mut jit::JitEvmExecutionContext<SPEC>,
     ) -> Result<ExecutionResult, JitEvmEngineError> {
-        // TODO: txdata from context. Calldata instruction
-        //       check gas_limits here, or from caller
-        let init_gas = init_gas::<SPEC>(&[]);
+        // TODO: check gas_limits here, or from caller
+        let init_gas = init_gas::<SPEC>(&context.calldata());
 
         unsafe {
             let mut ptrs = JitEvmPtrs::from_context(context);
@@ -371,6 +370,8 @@ impl<'ctx> JitContractBuilder<'ctx> {
                 Codesize => TransactionContext::build_get_codesize::<SPEC>(&ctx, current)?,
                 Caller => TransactionContext::build_get_caller::<SPEC>(&ctx, current)?,
                 Callvalue => TransactionContext::build_get_callvalue::<SPEC>(&ctx, current)?,
+                Calldataload => TransactionContext::build_get_calldata::<SPEC>(&ctx, current)?,
+                Calldatasize => TransactionContext::build_get_calldatalen::<SPEC>(&ctx, current)?,
                 Origin => TransactionContext::build_get_origin::<SPEC>(&ctx, current)?,
                 AugmentedPushJump(_, val) => {
                     ops::build_augmented_jump_op::<SPEC>(&ctx, current, val)?

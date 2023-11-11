@@ -421,7 +421,6 @@ fn operations_stack_underflow_sha3() {
 //Address,
 //Balance,
 //Calldataload,
-//Calldatasize,
 //CalldataCopy,
 //CodeCopy,
 //GasPrice,

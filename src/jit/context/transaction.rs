@@ -3,12 +3,16 @@ use crate::jit::{
     contract::BuilderContext,
     cursor::CurrentInstruction,
     gas::{build_gas_check, const_cost},
-    ops::{build_stack_check, build_stack_push},
+    ops::{build_stack_check, build_stack_pop, build_stack_push, build_stack_push_vector},
     JitEvmEngineError,
 };
 use alloy_primitives::{Address, U256};
 use inkwell::{
-    context::Context, targets::TargetData, types::StructType, values::IntValue, AddressSpace,
+    context::Context,
+    targets::TargetData,
+    types::StructType,
+    values::{BasicValue, IntValue},
+    AddressSpace, IntPredicate,
 };
 use revm_primitives::Spec;
 
@@ -254,6 +258,132 @@ impl<'ctx> TransactionContext {
             .into_int_value();
 
         let book = build_stack_push!(ctx, book, value);
+
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
+
+        Ok(())
+    }
+
+    pub(crate) fn build_get_calldata<'a, SPEC: Spec>(
+        ctx: &BuilderContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        build_gas_check!(ctx, current);
+        build_stack_check!(ctx, current, 1, 1);
+
+        let book = current.book();
+        let (book, offset) = build_stack_pop!(ctx, book);
+
+        let len = JitEvmPtrs::build_get_calldatalen(ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_calldata_ptr(ctx, book.execution_context)?;
+
+        let offset = ctx
+            .builder
+            .build_int_cast(offset, ctx.types.type_i64, "offset_cast")?;
+        let len = ctx
+            .builder
+            .build_int_cast(len, ctx.types.type_i64, "offset_cast")?;
+
+        let cmp = ctx
+            .builder
+            .build_int_compare(IntPredicate::UGT, offset, len, "")?;
+        let offset = ctx
+            .builder
+            .build_select(cmp, len, offset, "min")?
+            .into_int_value();
+
+        let const_32 = ctx.types.type_i64.const_int(32, false);
+        let end = ctx.builder.build_int_add(offset, const_32, "")?;
+
+        let cmp = ctx
+            .builder
+            .build_int_compare(IntPredicate::UGT, end, len, "calldata_overage")?;
+
+        let end = ctx
+            .builder
+            .build_select(cmp, len, end, "min")?
+            .into_int_value();
+        let bytes_len = ctx.builder.build_int_sub(end, offset, "")?;
+        let bytes_len = ctx
+            .builder
+            .build_int_cast(bytes_len, ctx.types.type_ptrint, "")?;
+
+        let const_0 = ctx.types.type_i8.const_int(0, false);
+        let const_32 = ctx.types.type_ptrint.const_int(32, false);
+
+        let offset = ctx.builder.build_int_to_ptr(
+            offset,
+            ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
+            "",
+        )?;
+        let src_ptr = ctx.builder.build_int_add(ptr, offset, "")?;
+        let dst_ptr0 = ctx
+            .builder
+            .build_alloca(ctx.types.type_stackel, "calldata_alloca")?;
+        ctx.builder.build_memset(dst_ptr0, 32, const_0, const_32)?;
+        ctx.builder
+            .build_memcpy(dst_ptr0, 32, src_ptr, 1, bytes_len)?;
+
+        let const_16 = ctx.types.type_ptrint.const_int(16, false);
+        let dst_int0 = ctx
+            .builder
+            .build_ptr_to_int(dst_ptr0, ctx.types.type_ptrint, "")?;
+        let dst_int1 = ctx.builder.build_int_add(dst_int0, const_16, "")?;
+
+        let dst_ptr0 = ctx.builder.build_int_to_ptr(
+            dst_int0,
+            ctx.types.type_ivec.ptr_type(AddressSpace::default()),
+            "",
+        )?;
+        let dst_ptr1 = ctx.builder.build_int_to_ptr(
+            dst_int1,
+            ctx.types.type_ivec.ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let v0 = ctx
+            .builder
+            .build_load(ctx.types.type_ivec, dst_ptr0, "calldata_value0")?
+            .into_vector_value();
+        let v1 = ctx
+            .builder
+            .build_load(ctx.types.type_ivec, dst_ptr1, "calldata_value1")?
+            .into_vector_value();
+
+        v0.as_instruction_value()
+            .ok_or(JitEvmEngineError::NoInstructionValue)?
+            .set_alignment(1)?;
+        v1.as_instruction_value()
+            .ok_or(JitEvmEngineError::NoInstructionValue)?
+            .set_alignment(1)?;
+
+        let shuffled = ctx
+            .builder
+            .build_shuffle_vector(v0, v1, ctx.types.swap_bytes, "")?;
+
+        let book = build_stack_push_vector!(ctx, book, shuffled);
+
+        ctx.builder
+            .build_unconditional_branch(current.next().block)?;
+        current.next().add_incoming(&book, current.block());
+
+        Ok(())
+    }
+
+    pub(crate) fn build_get_calldatalen<'a, SPEC: Spec>(
+        ctx: &BuilderContext<'ctx>,
+        current: &mut CurrentInstruction<'a, 'ctx>,
+    ) -> Result<(), JitEvmEngineError> {
+        build_gas_check!(ctx, current);
+        build_stack_check!(ctx, current, 0, 1);
+
+        let book = current.book();
+
+        let len = JitEvmPtrs::build_get_calldatalen(ctx, book.execution_context)?;
+
+        let book = build_stack_push!(ctx, book, len);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;

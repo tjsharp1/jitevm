@@ -554,7 +554,19 @@ macro_rules! build_gas_check_exp {
 
 pub fn init_gas<SPEC: Spec>(calldata: &[u8]) -> u64 {
     if SPEC::enabled(SpecId::LATEST) {
-        INIT_TX_COST
+        let cost = if calldata.len() == 0 {
+            0
+        } else {
+            calldata.iter().fold(0, |a, b| {
+                if *b == 0 {
+                    a + ZERO_DATA_COST
+                } else {
+                    a + NONZERO_DATA_COST
+                }
+            })
+        };
+
+        INIT_TX_COST + cost
     } else {
         unimplemented!("Only LATEST implemented currently!");
     }
@@ -745,6 +757,8 @@ pub fn const_cost<SPEC: Spec>(op: EvmOp) -> u64 {
         EvmOp::Origin => 2,
         EvmOp::Return => 0,
         EvmOp::Revert => 0,
+        EvmOp::Calldataload => 3,
+        EvmOp::Calldatasize => 2,
         EvmOp::AugmentedPushJumpi(_, _) => 13,
         EvmOp::AugmentedPushJump(_, _) => 11,
         _ => unimplemented!("Gas cost for {:?} unimplemented!", op),

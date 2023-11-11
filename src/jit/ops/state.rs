@@ -1,5 +1,4 @@
 use crate::jit::{
-    context::{JitContractExecutionResult, JitContractResultCode},
     contract::BuilderContext,
     cursor::CurrentInstruction,
     gas::{build_memory_gas_check, const_cost, memory_expansion_cost, memory_gas},

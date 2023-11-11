@@ -119,6 +119,54 @@ impl<'ctx> JitEvmPtrs {
             )?
             .into_pointer_value())
     }
+
+    pub fn build_get_calldata_ptr(
+        ctx: &BuilderContext<'ctx>,
+        execution_context: IntValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, JitEvmEngineError> {
+        let ptr = ctx.builder.build_int_to_ptr(
+            execution_context,
+            ctx.types
+                .execution_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let offset =
+            ctx.builder
+                .build_struct_gep(ctx.types.execution_context, ptr, 4, "get_calldata")?;
+
+        Ok(ctx
+            .builder
+            .build_load(
+                ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
+                offset,
+                "calldata_ptr",
+            )?
+            .into_pointer_value())
+    }
+
+    pub fn build_get_calldatalen(
+        ctx: &BuilderContext<'ctx>,
+        execution_context: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, JitEvmEngineError> {
+        let ptr = ctx.builder.build_int_to_ptr(
+            execution_context,
+            ctx.types
+                .execution_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let offset =
+            ctx.builder
+                .build_struct_gep(ctx.types.execution_context, ptr, 5, "get_calldatalen")?;
+
+        Ok(ctx
+            .builder
+            .build_load(ctx.types.type_i64, offset, "calldatalen")?
+            .into_int_value())
+    }
 }
 
 impl JitEvmPtrs {
@@ -226,6 +274,10 @@ pub struct JitEvmExecutionContext<SPEC: Spec> {
 }
 
 impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
+    pub fn calldata(&self) -> &[u8] {
+        &self.calldata
+    }
+
     pub fn set_number(&mut self, num: U256) {
         self.block_context.number = num;
     }
@@ -256,6 +308,10 @@ impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
 
     pub fn set_caller(&mut self, caller: Address) {
         self.transaction_context.caller = caller.into_word().into();
+    }
+
+    pub fn set_calldata(&mut self, data: Bytes) {
+        self.calldata = data;
     }
 }
 

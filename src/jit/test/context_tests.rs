@@ -1,11 +1,15 @@
-use super::{expect_halt, expect_stack_overflow, expect_success, memory_gas_calc, test_jit};
+use super::{
+    expect_halt, expect_stack_overflow, expect_stack_underflow, expect_success, memory_gas_calc,
+    test_jit,
+};
 use crate::jit::{
     gas, EvmOp, ExecutionResult, Halt, JitEvmExecutionContext, Success, TransactionConfig,
     EVM_STACK_SIZE,
 };
 use alloy_primitives::{Address, B256, U256};
+use bytes::Bytes;
 use paste::paste;
-use rand::Rng;
+use rand::{Rng, RngCore};
 use revm::InMemoryDB;
 use revm_primitives::LatestSpec;
 
@@ -215,3 +219,126 @@ fn operations_jit_test_codesize() {
     }
 }
 expect_stack_overflow!(codesize, EvmOp::Codesize, 1);
+
+#[test]
+fn operations_jit_test_calldatalen() {
+    for _ in 0..200 {
+        let db = InMemoryDB::default();
+        let calldatasize = rand::thread_rng().gen::<u16>() & 0xfff;
+        let calldata = Bytes::copy_from_slice(&vec![0u8; calldatasize as usize]);
+
+        let mut context = JitEvmExecutionContext::builder(LatestSpec)
+            .with_calldata(calldata.clone())
+            .build_with_db(&db);
+
+        let ops = vec![
+            EvmOp::Calldatasize,
+            EvmOp::Push(32, U256::ZERO),
+            EvmOp::Mstore,
+        ];
+
+        let size = U256::from(calldatasize);
+
+        let expected_mem = size.to_be_bytes_vec();
+
+        let result = test_jit(LatestSpec, ops, &mut context).expect("Contract build failed");
+
+        let op_cost = gas::const_cost::<LatestSpec>(EvmOp::Calldatasize);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+
+        let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+        let init_cost = gas::init_gas::<LatestSpec>(&calldata);
+
+        let mem_gas = memory_gas_calc::<LatestSpec>(32);
+        let expected_gas = init_cost + push_cost + const_cost + mem_gas + op_cost;
+
+        expect_success!(test_calldatalen, result, Success::Stop, expected_gas);
+
+        let JitEvmExecutionContext { memory, .. } = context;
+
+        let mem_range = 0..0x20;
+        assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+    }
+}
+expect_stack_overflow!(calldatalen, EvmOp::Calldatasize, 1);
+
+#[test]
+fn operations_jit_test_calldataload() {
+    for _ in 0..200 {
+        let db = InMemoryDB::default();
+
+        let calldatasize = rand::thread_rng().gen_range(96..4096);
+        let mut calldata = vec![0u8; calldatasize];
+
+        rand::thread_rng().fill_bytes(&mut calldata);
+        let calldata = Bytes::copy_from_slice(&calldata);
+
+        let mut context = JitEvmExecutionContext::builder(LatestSpec)
+            .with_calldata(calldata.clone())
+            .build_with_db(&db);
+
+        let ops = vec![
+            EvmOp::Push(32, U256::ZERO),
+            EvmOp::Calldataload,
+            EvmOp::Push(32, U256::ZERO),
+            EvmOp::Mstore,
+            EvmOp::Push(32, U256::from(1)),
+            EvmOp::Calldataload,
+            EvmOp::Push(32, U256::from(0x20)),
+            EvmOp::Mstore,
+            EvmOp::Push(32, U256::from(calldatasize - 3)),
+            EvmOp::Calldataload,
+            EvmOp::Push(32, U256::from(0x40)),
+            EvmOp::Mstore,
+            EvmOp::Push(32, U256::from(calldatasize)),
+            EvmOp::Calldataload,
+            EvmOp::Push(32, U256::from(0x60)),
+            EvmOp::Mstore,
+            // way outta bounds... should give 0's
+            EvmOp::Push(32, U256::from(8192)),
+            EvmOp::Calldataload,
+            EvmOp::Push(32, U256::from(0x80)),
+            EvmOp::Mstore,
+        ];
+
+        let mut expected_mem: Vec<u8> = Vec::new();
+        expected_mem.extend(&calldata[..0x20]);
+        expected_mem.extend(&calldata[0x1..0x21]);
+        expected_mem.extend(&calldata[calldatasize - 3..calldatasize]);
+        expected_mem.extend(&vec![0u8; 29]);
+        expected_mem.extend(&vec![0u8; 0x20]);
+        expected_mem.extend(&vec![0u8; 0x20]);
+
+        let result = test_jit(LatestSpec, ops, &mut context).expect("Contract build failed");
+
+        let op_cost = gas::const_cost::<LatestSpec>(EvmOp::Calldataload);
+        let push_cost = gas::const_cost::<LatestSpec>(EvmOp::Push(32, U256::ZERO));
+
+        let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+        let init_cost = gas::init_gas::<LatestSpec>(&calldata);
+
+        let mem_gas = memory_gas_calc::<LatestSpec>(0xa0);
+        let expected_gas = init_cost + 10 * push_cost + (const_cost + op_cost) * 5 + mem_gas;
+
+        expect_success!(test_calldataload, result, Success::Stop, expected_gas);
+
+        let JitEvmExecutionContext { memory, .. } = context;
+
+        let mem_range = 0..0x20;
+        assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+
+        let mem_range = 0x20..0x40;
+        assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+
+        let mem_range = 0x40..0x60;
+        assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+
+        let mem_range = 0x60..0x80;
+        assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+
+        let mem_range = 0x80..0xa0;
+        assert_eq!(memory[mem_range.clone()], expected_mem[mem_range.clone()]);
+    }
+}
+expect_stack_underflow!(calldataload, EvmOp::Calldataload, 1);
+expect_stack_overflow!(calldataload, EvmOp::Calldataload, 1);
