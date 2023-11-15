@@ -12,7 +12,7 @@ use inkwell::{
     targets::TargetData,
     types::StructType,
     values::{BasicValue, IntValue},
-    AddressSpace, IntPredicate,
+    AddressSpace,
 };
 use revm_primitives::Spec;
 
@@ -281,20 +281,20 @@ impl<'ctx> TransactionContext {
 
         let offset = ctx
             .builder
-            .build_int_cast(offset, ctx.types.type_i64, "offset_cast")?;
+            .build_int_cast(offset, ctx.types.type_ptrint, "offset_cast")?;
         let len = ctx
             .builder
-            .build_int_cast(len, ctx.types.type_i64, "offset_cast")?;
+            .build_int_cast(len, ctx.types.type_ptrint, "len_cast")?;
 
         let cmp = ctx
             .builder
             .build_int_compare(IntPredicate::UGT, offset, len, "")?;
         let offset = ctx
             .builder
-            .build_select(cmp, len, offset, "min")?
+            .build_select(cmp, len, offset, "start_off")?
             .into_int_value();
 
-        let const_32 = ctx.types.type_i64.const_int(32, false);
+        let const_32 = ctx.types.type_ptrint.const_int(32, false);
         let end = ctx.builder.build_int_add(offset, const_32, "")?;
 
         let cmp = ctx
@@ -303,7 +303,7 @@ impl<'ctx> TransactionContext {
 
         let end = ctx
             .builder
-            .build_select(cmp, len, end, "min")?
+            .build_select(cmp, len, end, "end_off")?
             .into_int_value();
         let bytes_len = ctx.builder.build_int_sub(end, offset, "")?;
         let bytes_len = ctx
@@ -313,12 +313,13 @@ impl<'ctx> TransactionContext {
         let const_0 = ctx.types.type_i8.const_int(0, false);
         let const_32 = ctx.types.type_ptrint.const_int(32, false);
 
-        let offset = ctx.builder.build_int_to_ptr(
-            offset,
+        let ptr = ctx.builder.build_ptr_to_int(ptr, ctx.types.type_ptrint, "")?;
+        let src_ptr = ctx.builder.build_int_add(ptr, offset, "")?;
+        let src_ptr = ctx.builder.build_int_to_ptr(
+            src_ptr,
             ctx.types.type_ptrint.ptr_type(AddressSpace::default()),
             "",
         )?;
-        let src_ptr = ctx.builder.build_int_add(ptr, offset, "")?;
         let dst_ptr0 = ctx
             .builder
             .build_alloca(ctx.types.type_stackel, "calldata_alloca")?;

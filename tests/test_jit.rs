@@ -16,11 +16,12 @@ use std::path::PathBuf;
 
 fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
     let context = Context::create();
+    let indexed = code.augment().index();
     let contract = JitContractBuilder::with_context("contract", &context)
         .expect("Could not build builder")
         .debug_ir("evm_equivalence.ll")
         .debug_asm("evm_equivalence.asm")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, indexed)
         .expect("Could not JIT contract");
 
     let bytes = Bytes::copy_from_slice(&code.to_bytes());
@@ -67,11 +68,12 @@ macro_rules! assert_evm_jit_equivalence {
         let name = stringify!($test_data);
         let code = load_evm_code(name);
 
-        let jit_result = test_jit_with_code(code.clone());
-        let ResultAndState { result, .. } = test_evm_with_code(code);
-
+        let ResultAndState { result, .. } = test_evm_with_code(code.clone());
         println!("TJDEBUG evmresult {:#?}", result);
+
+        let jit_result = test_jit_with_code(code);
         println!("TJDEBUG jitresult {:#?}", jit_result);
+
         match result {
             REVMExecutionResult::Success {
                 reason,
@@ -165,7 +167,18 @@ macro_rules! assert_evm_jit_equivalence {
                     REVMHalt::CallTooDeep => assert_eq!(jit_reason, Halt::CallTooDeep),
                 }
             }
-            _ => unimplemented!("Not implemented for revert results!"),
+            REVMExecutionResult::Revert { gas_used, output } => {
+                let ExecutionResult::Revert {
+                    gas_used: jit_gas_used,
+                    output: jit_output,
+                } = jit_result
+                else {
+                    panic!("JIT dit not return revert when it should have!");
+                };
+
+                assert_eq!(gas_used, jit_gas_used, "REVERT: EVM and JIT gas not equivalent!");
+                assert_eq!(output, jit_output, "REVERT: EVM and JIT output not equivalent!");
+            }
         }
     };
 }
@@ -213,10 +226,4 @@ fn test_evm_and_jit_sload() {
 #[test]
 fn test_evm_and_jit_reth_random_stuff() {
     assert_evm_jit_equivalence!(reth_random_stuff);
-}
-
-#[ignore]
-#[test]
-fn test_evm_and_jit_snailtracer() {
-    assert_evm_jit_equivalence!(snailtracer);
 }

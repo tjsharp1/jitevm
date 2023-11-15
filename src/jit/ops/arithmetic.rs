@@ -212,6 +212,8 @@ pub(crate) fn build_signextend_op<'a, 'ctx, SPEC: Spec>(
 
     ctx.builder.position_at_end(else_block.block);
 
+    let book = else_block.book();
+
     let (book, y) = build_stack_pop!(ctx, book);
 
     let const_1 = ctx.types.type_stackel.const_int(1, false);
@@ -237,7 +239,9 @@ pub(crate) fn build_signextend_op<'a, 'ctx, SPEC: Spec>(
         .build_select(is_signed, extended, unextended, "")?
         .into_int_value();
 
-    build_stack_push!(ctx, book, result);
+    let book = build_stack_push!(ctx, book, result);
+
+    next.add_incoming(&book, &else_block);
     ctx.builder.build_unconditional_branch(next.block)?;
     Ok(())
 }

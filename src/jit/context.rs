@@ -1,7 +1,6 @@
 use crate::constants::*;
 use crate::jit::{contract::BuilderContext, error::JitEvmEngineError};
 use alloy_primitives::{Address, B256, U256};
-use bytes::Bytes;
 use inkwell::{
     context::Context,
     targets::TargetData,
@@ -9,7 +8,7 @@ use inkwell::{
     values::{IntValue, PointerValue},
     AddressSpace,
 };
-use revm_primitives::{db::Database, Spec, State};
+use revm_primitives::{Bytes, db::Database, Spec, State};
 
 mod block;
 mod result;

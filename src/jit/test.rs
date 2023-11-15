@@ -54,14 +54,14 @@ fn memory_gas_calc<SPEC: Spec>(offset: u64) -> u64 {
 
 macro_rules! expect_success {
     ($fname:ident, $result:ident, $reason:expr, $gas:ident) => {{
-        use bytes::Bytes;
+        use revm_primitives::Bytes;
 
         let refund = 0;
         let output = Bytes::new();
         expect_success!($fname, $result, $reason, $gas, refund, output);
     }};
     ($fname:ident, $result:ident, $reason:expr, $gas:ident, $refund:ident) => {{
-        use bytes::Bytes;
+        use revm_primitives::Bytes;
 
         let output = Bytes::new();
         expect_success!($fname, $result, $reason, $gas, $refund, output);

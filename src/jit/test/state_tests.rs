@@ -1,9 +1,8 @@
 use super::{expect_revert, expect_success, memory_gas_calc, test_jit};
 use crate::jit::{gas, EvmOp, ExecutionResult, JitEvmExecutionContext, Success};
 use alloy_primitives::U256;
-use bytes::Bytes;
 use revm::db::InMemoryDB;
-use revm_primitives::LatestSpec;
+use revm_primitives::{Bytes, LatestSpec};
 
 #[test]
 fn operations_jit_test_revert() {

@@ -7,11 +7,10 @@ use crate::jit::{
     EVM_STACK_SIZE,
 };
 use alloy_primitives::{Address, B256, U256};
-use bytes::Bytes;
 use paste::paste;
 use rand::{Rng, RngCore};
 use revm::InMemoryDB;
-use revm_primitives::LatestSpec;
+use revm_primitives::{Bytes, LatestSpec};
 
 macro_rules! check_context {
     ($evmop:expr, $setter:ident, $ty:ident) => {{

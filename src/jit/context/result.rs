@@ -3,10 +3,10 @@ use crate::jit::{
     contract::{BuilderContext, JitEvmEngineSimpleBlock},
     JitEvmEngineError,
 };
-use bytes::Bytes;
 use inkwell::{
     context::Context, targets::TargetData, types::StructType, values::IntValue, AddressSpace,
 };
+use revm_primitives::Bytes;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Success {

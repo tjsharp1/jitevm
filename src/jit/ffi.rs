@@ -36,10 +36,13 @@ impl<'ctx> HostFunctions<'ctx> {
     ) -> HostFunctions<'ctx> {
         let cb_type = types
             .type_void
-            .fn_type(&[types.type_ptrint.into(), types.type_bool.into()], false);
+            .fn_type(&[types.type_i64.into(), types.type_bool.into()], false);
         let cb_print_u64 = module.add_function("callback_print_u64", cb_type, None);
         execution_engine.add_global_mapping(&cb_print_u64, callback_print_u64 as usize);
 
+        let cb_type = types
+            .type_void
+            .fn_type(&[types.type_ptrint.into(), types.type_bool.into()], false);
         let cb_print_u256 = module.add_function("callback_print_u256", cb_type, None);
         execution_engine.add_global_mapping(&cb_print_u256, callback_print_u256 as usize);
 
@@ -230,8 +233,7 @@ pub extern "C" fn callback_sha3(exectx: usize, sp: usize, ptr: usize, size: usiz
     *rawptrs.stack_mut(sp, 0) = U256::try_from_be_slice(hash.as_slice()).expect("No bytes");
 }
 
-pub extern "C" fn callback_print_u64(ptr: usize, hex: bool) {
-    let item: &u64 = unsafe { &*(ptr as *const _) };
+pub extern "C" fn callback_print_u64(item: u64, hex: bool) {
     if hex {
         println!("U64 value 0x{:x}", item);
     } else {

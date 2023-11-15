@@ -196,7 +196,7 @@ impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
         context: &mut jit::JitEvmExecutionContext<SPEC>,
     ) -> Result<ExecutionResult, JitEvmEngineError> {
         // TODO: check gas_limits here, or from caller
-        let init_gas = init_gas::<SPEC>(&context.calldata());
+        let init_gas = init_gas::<SPEC>(context.calldata());
 
         unsafe {
             let mut ptrs = JitEvmPtrs::from_context(context);
@@ -205,7 +205,7 @@ impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
             self.function.call(
                 &mut ptrs as *mut _ as usize,
                 &mut result as *mut _ as usize,
-                init_gas as u64,
+                init_gas,
             );
 
             Ok(ExecutionResult::from(result))
@@ -236,7 +236,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let builder = context.create_builder();
         let execution_engine = module.create_jit_execution_engine(OptimizationLevel::Aggressive)?;
 
-        let types = JitTypes::new(&context, &execution_engine);
+        let types = JitTypes::new(context, &execution_engine);
         let host_functions = jit::HostFunctions::new(types.clone(), &module, &execution_engine);
 
         let ctx = BuilderContext {
