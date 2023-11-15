@@ -3,10 +3,10 @@ use alloy_primitives::{Address, B256, U256};
 use reth_provider::StateProvider;
 use revm::{
     db::DatabaseRef,
-    primitives::{AccountInfo, Bytecode},
+    primitives::{AccountInfo},
     Database,
 };
-use revm_primitives::KECCAK_EMPTY;
+use revm_primitives::{Bytecode, KECCAK_EMPTY};
 
 #[derive(Debug, Clone)]
 pub struct StateProviderDatabase<DB: StateProvider>(pub DB);

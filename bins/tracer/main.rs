@@ -2,7 +2,7 @@ use alloy_primitives::Address;
 use clap::Parser;
 use eyre::eyre;
 use inkwell::context::Context;
-use jitevm::{
+use jit_contract::{
     code::{EvmCode, EvmOpParserMode},
     db::StateProviderDatabase,
     jit::{contract::JitContractBuilder, JitEvmExecutionContext, TransactionConfig},

@@ -1,6 +1,6 @@
 use inkwell::context::Context;
-use jitevm::code::{EvmCode, EvmOpParserMode};
-use jitevm::jit::{
+use jit_contract::code::{EvmCode, EvmOpParserMode};
+use jit_contract::jit::{
     contract::JitContractBuilder, ExecutionResult, Halt, JitEvmExecutionContext, Success,
 };
 use revm::{
@@ -12,7 +12,19 @@ use revm::{
     EVM,
 };
 use revm_primitives::LatestSpec;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn workspace_dir() -> PathBuf {
+    let output = std::process::Command::new(env!("CARGO"))
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format=plain")
+        .output()
+        .unwrap()
+        .stdout;
+    let cargo_path = Path::new(std::str::from_utf8(&output).unwrap().trim());
+    cargo_path.parent().unwrap().to_path_buf()
+}
 
 fn test_jit_with_code(code: EvmCode) -> ExecutionResult {
     let context = Context::create();
@@ -51,9 +63,10 @@ fn test_evm_with_code(code: EvmCode) -> ResultAndState {
 }
 
 fn load_evm_code(test_name: &str) -> EvmCode {
-    let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
+    let workspace_dir = workspace_dir();
+
     let mut path = PathBuf::new();
-    path.push(test_base_dir);
+    path.push(workspace_dir);
     path.push("contracts");
     path.push(format!("{}.bc", test_name));
 

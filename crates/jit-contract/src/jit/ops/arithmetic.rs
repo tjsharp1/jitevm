@@ -8,9 +8,9 @@ use crate::jit::{
 use inkwell::{AddressSpace, IntPredicate};
 use revm_primitives::Spec;
 
-pub(crate) fn iszero_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn iszero_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
@@ -38,9 +38,9 @@ pub(crate) fn iszero_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_byte_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_byte_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
@@ -75,9 +75,9 @@ pub(crate) fn build_byte_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_arithmetic_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_arithmetic_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
@@ -123,9 +123,9 @@ pub(crate) fn build_arithmetic_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_cmp_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_cmp_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
@@ -182,9 +182,9 @@ pub(crate) fn build_cmp_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_signextend_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
@@ -246,9 +246,9 @@ pub(crate) fn build_signextend_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_mod_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_mod_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 3, 0);
@@ -316,9 +316,9 @@ macro_rules! op2_i256_exp_bit {
     }};
 }
 
-pub(crate) fn build_exp_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
@@ -365,7 +365,7 @@ pub(crate) fn build_exp_op<'a, 'ctx, SPEC: Spec>(
         let then_book = build_stack_push!(ctx, then_book, const_1);
 
         let next = current.next();
-        next.add_incoming(&then_book, &current.block());
+        next.add_incoming(&then_book, current.block());
 
         ctx.builder.build_unconditional_branch(next.block)?;
     }
@@ -406,7 +406,7 @@ pub(crate) fn build_exp_op<'a, 'ctx, SPEC: Spec>(
     let loop_book = loop_block.book();
     let loop_end_book = loop_end_block.book();
 
-    loop_block.add_incoming(&else_book, &else_block);
+    loop_block.add_incoming(&else_book, else_block);
     loop_block.add_incoming(&loop_book, &loop_block);
     loop_end_block.add_incoming(&loop_book, &loop_block);
 
@@ -453,9 +453,9 @@ pub(crate) fn build_exp_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_not_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_not_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);

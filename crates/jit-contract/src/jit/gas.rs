@@ -554,7 +554,7 @@ macro_rules! build_gas_check_exp {
 
 pub fn init_gas<SPEC: Spec>(calldata: &[u8]) -> u64 {
     if SPEC::enabled(SpecId::LATEST) {
-        let cost = if calldata.len() == 0 {
+        let cost = if calldata.is_empty() {
             0
         } else {
             calldata.iter().fold(0, |a, b| {
@@ -609,6 +609,8 @@ fn sstore_cost<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool)
 
 fn sstore_refund<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> i64 {
     if SPEC::enabled(SpecId::LATEST) {
+
+        #[allow(clippy::collapsible_else_if)]
         if current == new {
             0
         } else {

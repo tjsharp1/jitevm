@@ -289,15 +289,15 @@ impl<'ctx> JitContractBuilder<'ctx> {
             ctx.builder.position_at_end(current.block().block);
 
             match current.op() {
-                Stop => ops::build_stop_op::<SPEC>(&ctx, current)?,
+                Stop => ops::build_stop_op(&ctx, current)?,
                 Push(_, val) => ops::build_push_op::<SPEC>(&ctx, current, val)?,
                 Pop => ops::build_pop_op::<SPEC>(&ctx, current)?,
                 Jumpdest => ops::build_jumpdest_op::<SPEC>(&ctx, current)?,
                 Mstore => ops::build_mstore_op::<SPEC>(&ctx, current)?,
                 Mstore8 => ops::build_mstore8_op::<SPEC>(&ctx, current)?,
                 Mload => ops::build_mload_op::<SPEC>(&ctx, current)?,
-                Sload => host_functions.build_sload::<SPEC>(&ctx, current)?,
-                Sstore => host_functions.build_sstore::<SPEC>(&ctx, current)?,
+                Sload => host_functions.build_sload(&ctx, current)?,
+                Sstore => host_functions.build_sstore(&ctx, current)?,
                 Sha3 => host_functions.build_sha3::<SPEC>(&ctx, current)?,
                 Jump => ops::build_jump_op::<SPEC>(&ctx, current)?,
                 Jumpi => ops::build_jumpi_op::<SPEC>(&ctx, current)?,

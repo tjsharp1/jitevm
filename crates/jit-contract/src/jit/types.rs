@@ -38,7 +38,7 @@ impl<'ctx> JitTypes<'ctx> {
         let target_data = engine.get_target_data();
         let is_little_endian = target_data.get_byte_ordering() == ByteOrdering::LittleEndian;
 
-        let type_ptrint = context.ptr_sized_int_type(&target_data, None);
+        let type_ptrint = context.ptr_sized_int_type(target_data, None);
         assert_eq!(type_ptrint.get_bit_width(), 64);
         assert_eq!(usize::BITS, 64);
 
@@ -71,10 +71,10 @@ impl<'ctx> JitTypes<'ctx> {
         let type_bool = context.bool_type();
         let type_void = context.void_type();
 
-        let execution_context = JitEvmPtrs::llvm_struct_type(&context, &target_data);
-        let execution_result = JitContractExecutionResult::llvm_struct_type(&context, &target_data);
-        let block_context = BlockContext::llvm_struct_type(&context, &target_data);
-        let transaction_context = TransactionContext::llvm_struct_type(&context, &target_data);
+        let execution_context = JitEvmPtrs::llvm_struct_type(context, target_data);
+        let execution_result = JitContractExecutionResult::llvm_struct_type(context, target_data);
+        let block_context = BlockContext::llvm_struct_type(context, target_data);
+        let transaction_context = TransactionContext::llvm_struct_type(context, target_data);
 
         JitTypes {
             type_ptrint,

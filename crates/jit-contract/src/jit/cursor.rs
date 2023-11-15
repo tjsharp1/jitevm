@@ -86,7 +86,7 @@ impl<'a, 'ctx> Iter<'a, 'ctx> {
             current: CurrentInstruction {
                 idx: 0,
                 current_block: None,
-                render: &render,
+                render,
             },
         }
     }
@@ -101,12 +101,10 @@ impl<'a, 'ctx> LendingIterator for Iter<'a, 'ctx> {
         if self.init {
             self.init = false;
             Some(&mut self.current)
+        } else if self.current.step() {
+            Some(&mut self.current)
         } else {
-            if self.current.step() {
-                Some(&mut self.current)
-            } else {
-                None
-            }
+            None
         }
     }
 }
@@ -175,7 +173,7 @@ impl<'ctx> InstructionCursor<'ctx> {
             )?;
 
             let init_gas = function.get_nth_param(2).unwrap().into_int_value();
-            let gas_limit = TransactionContext::gas_limit(&ctx, execution_context)?;
+            let gas_limit = TransactionContext::gas_limit(ctx, execution_context)?;
             let gas_remaining = ctx.builder.build_int_sub(gas_limit, init_gas, "")?;
             let gas_refund = ctx.types.type_i64.const_int(0, false);
 
@@ -187,9 +185,9 @@ impl<'ctx> InstructionCursor<'ctx> {
             let mem_gas = ctx.types.type_i64.const_int(0, false);
 
             JitEvmEngineBookkeeping {
-                execution_context: execution_context,
+                execution_context,
                 sp_min: sp_int,
-                sp_max: sp_max,
+                sp_max,
                 gas_remaining,
                 gas_refund,
                 sp: sp_int,
@@ -210,7 +208,7 @@ impl<'ctx> InstructionCursor<'ctx> {
             };
             let label = format!("i{}", i);
             instructions.push(JitEvmEngineSimpleBlock::new(
-                &ctx,
+                ctx,
                 block_before,
                 &label,
                 &format!("_{}", i),
@@ -225,9 +223,9 @@ impl<'ctx> InstructionCursor<'ctx> {
         // END HANDLER
 
         let end_block =
-            JitEvmEngineSimpleBlock::new(&ctx, instructions[ops_len - 1].block, &"end", &"-end")?;
+            JitEvmEngineSimpleBlock::new(ctx, instructions[ops_len - 1].block, "end", "-end")?;
 
-        JitContractExecutionResult::build_exit_stop(&ctx, &end_block)?;
+        JitContractExecutionResult::build_exit_stop(ctx, &end_block)?;
 
         Ok(InstructionCursor {
             code,

@@ -195,10 +195,7 @@ impl JitContractResultCode {
     pub fn is_success(&self) -> bool {
         use JitContractResultCode::*;
 
-        match self {
-            SuccessStop | SuccessReturn | SuccessSelfDestruct => true,
-            _ => false,
-        }
+        matches!(self, SuccessStop | SuccessReturn | SuccessSelfDestruct)
     }
 
     pub fn is_revert(&self) -> bool {
@@ -353,7 +350,7 @@ impl<'ctx> JitContractExecutionResult {
             ctx.builder
                 .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
 
-        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_limit = TransactionContext::gas_limit(ctx, book.execution_context)?;
         ctx.builder.build_store(gas_used_ptr, gas_limit)?;
 
         ctx.builder.build_return(None)?;
@@ -394,7 +391,7 @@ impl<'ctx> JitContractExecutionResult {
             ctx.builder
                 .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
 
-        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_limit = TransactionContext::gas_limit(ctx, book.execution_context)?;
         let gas_used = ctx
             .builder
             .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
@@ -467,7 +464,7 @@ impl<'ctx> JitContractExecutionResult {
             ctx.builder
                 .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
 
-        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_limit = TransactionContext::gas_limit(ctx, book.execution_context)?;
         let gas_used = ctx
             .builder
             .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;
@@ -519,7 +516,7 @@ impl<'ctx> JitContractExecutionResult {
             ctx.builder
                 .build_struct_gep(ctx.types.execution_result, ptr, 1, "gas_used_offset")?;
 
-        let gas_limit = TransactionContext::gas_limit(&ctx, book.execution_context)?;
+        let gas_limit = TransactionContext::gas_limit(ctx, book.execution_context)?;
         let gas_used = ctx
             .builder
             .build_int_sub(gas_limit, book.gas_remaining, "calc_gas_used")?;

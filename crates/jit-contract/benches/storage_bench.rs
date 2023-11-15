@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inkwell::context::Context;
-use jitevm::code::{EvmCode, EvmOpParserMode};
-use jitevm::jit::{
+use jit_contract::code::{EvmCode, EvmOpParserMode};
+use jit_contract::jit::{
     contract::{JitContractBuilder, JitEvmContract},
     JitEvmExecutionContext,
 };
@@ -11,13 +11,26 @@ use revm::{
     EVM,
 };
 use revm_primitives::{LatestSpec, Spec};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+fn workspace_dir() -> PathBuf {
+    let output = std::process::Command::new(env!("CARGO"))
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--message-format=plain")
+        .output()
+        .unwrap()
+        .stdout;
+    let cargo_path = Path::new(std::str::from_utf8(&output).unwrap().trim());
+    cargo_path.parent().unwrap().to_path_buf()
+}
+
 fn load_evm_code(test_name: &str) -> EvmCode {
-    let test_base_dir = std::env::var("CARGO_MANIFEST_DIR").expect("No cargo root");
+    let workspace_dir = workspace_dir();
+
     let mut path = PathBuf::new();
-    path.push(test_base_dir);
+    path.push(workspace_dir);
     path.push("contracts");
     path.push(format!("{}.bc", test_name));
 

@@ -5,9 +5,9 @@ use crate::jit::{
     JitEvmEngineError,
 };
 
-pub(crate) fn build_invalid_op<'a, 'ctx>(
+pub(crate) fn build_invalid_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let block = current.block();
 

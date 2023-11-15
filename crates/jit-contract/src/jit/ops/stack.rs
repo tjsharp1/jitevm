@@ -8,9 +8,9 @@ use alloy_primitives::U256;
 use inkwell::AddressSpace;
 use revm_primitives::Spec;
 
-pub(crate) fn build_push_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_push_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
@@ -29,9 +29,9 @@ pub(crate) fn build_push_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_pop_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_pop_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
@@ -335,9 +335,9 @@ macro_rules! build_stack_read {
     }};
 }
 
-pub(crate) fn build_stack_swap_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_stack_swap_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let swap1 = EvmOp::Swap1.opcode();
     let swap16 = EvmOp::Swap16.opcode();
@@ -351,7 +351,7 @@ pub(crate) fn build_stack_swap_op<'a, 'ctx, SPEC: Spec>(
 
     let book = current.book();
     let (book, a) = build_stack_read!(ctx, book, 1);
-    let (book, b) = build_stack_read!(ctx, book, idx as u64);
+    let (book, b) = build_stack_read!(ctx, book, idx);
     let book = build_stack_write!(ctx, book, 1, b);
     let book = build_stack_write!(ctx, book, idx, a);
 
@@ -362,9 +362,9 @@ pub(crate) fn build_stack_swap_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_dup_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_dup_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     use crate::jit::{EVM_JIT_STACK_ALIGN, EVM_STACK_ELEMENT_SIZE};
 

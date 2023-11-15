@@ -114,12 +114,12 @@ impl<'ctx> TransactionContext {
         ctx.struct_type(&fields, false)
     }
 
-    pub(crate) fn gas_limit<'a>(
+    pub(crate) fn gas_limit(
         ctx: &BuilderContext<'ctx>,
         execution_context: IntValue<'ctx>,
     ) -> Result<IntValue<'ctx>, JitEvmEngineError> {
         let tx_context_ptr =
-            JitEvmPtrs::build_get_transaction_context_ptr(&ctx, execution_context)?;
+            JitEvmPtrs::build_get_transaction_context_ptr(ctx, execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             tx_context_ptr,
             ctx.types

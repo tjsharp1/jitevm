@@ -9,20 +9,20 @@ use alloy_primitives::U256;
 use inkwell::AddressSpace;
 use revm_primitives::Spec;
 
-pub(crate) fn build_stop_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_stop_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let block = current.block();
 
-    JitContractExecutionResult::build_exit_stop(&ctx, block)?;
+    JitContractExecutionResult::build_exit_stop(ctx, block)?;
 
     Ok(())
 }
 
-pub(crate) fn build_jumpdest_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_jumpdest_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
 
@@ -34,9 +34,9 @@ pub(crate) fn build_jumpdest_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_jump_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
@@ -54,7 +54,7 @@ pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
             let jmp_target = code.opidx2target[jmp_i];
             jump_table.push(JitEvmEngineSimpleBlock::new(
-                &ctx,
+                ctx,
                 if j == 0 {
                     this.block
                 } else {
@@ -92,7 +92,7 @@ pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
                 let error_label = format!("instruction #{}: error", current.idx());
                 let error_idx = format!("i#{}_{}", current.idx(), j);
                 let error_block = JitEvmEngineSimpleBlock::new(
-                    &ctx,
+                    ctx,
                     jump_table[j].block,
                     &error_label,
                     &error_idx,
@@ -108,7 +108,7 @@ pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
                 error_block.add_incoming(&book, &jump_table[j]);
                 ctx.builder.position_at_end(error_block.block);
                 JitContractExecutionResult::build_exit_halt(
-                    &ctx,
+                    ctx,
                     &error_block,
                     JitContractResultCode::InvalidJump,
                 )?;
@@ -127,9 +127,9 @@ pub(crate) fn build_jump_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
@@ -194,7 +194,7 @@ pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
                 let error_label = format!("instruction #{}: error", current.idx());
                 let error_idx = format!("i#{}_{}", current.idx(), j);
                 let error_block = JitEvmEngineSimpleBlock::new(
-                    &ctx,
+                    ctx,
                     jump_table[j].block,
                     &error_label,
                     &error_idx,
@@ -211,7 +211,7 @@ pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
                 error_block.add_incoming(&book, &jump_table[j]);
                 ctx.builder.position_at_end(error_block.block);
                 JitContractExecutionResult::build_exit_halt(
-                    &ctx,
+                    ctx,
                     &error_block,
                     JitContractResultCode::InvalidJump,
                 )?;
@@ -230,9 +230,9 @@ pub(crate) fn build_jumpi_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_augmented_jump_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_augmented_jump_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
@@ -255,9 +255,9 @@ pub(crate) fn build_augmented_jump_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_augmented_jumpi_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_augmented_jumpi_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);

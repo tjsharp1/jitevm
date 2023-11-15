@@ -138,6 +138,10 @@ pub enum EvmOpParserMode {
 }
 
 impl EvmOp {
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     pub fn len(&self) -> usize {
         use EvmOp::*;
 
@@ -413,12 +417,12 @@ impl EvmOp {
             AugmentedPushJump(len, val) => Push(*len, *val)
                 .to_bytes()
                 .into_iter()
-                .chain(Jump.to_bytes().into_iter())
+                .chain(Jump.to_bytes())
                 .collect(),
             AugmentedPushJumpi(len, val) => Push(*len, *val)
                 .to_bytes()
                 .into_iter()
-                .chain(Jumpi.to_bytes().into_iter())
+                .chain(Jumpi.to_bytes())
                 .collect(),
 
             Unknown(opcode) => vec![*opcode],
@@ -428,21 +432,21 @@ impl EvmOp {
     pub fn new_from_bytes(b: &[u8], mode: EvmOpParserMode) -> Result<(Self, usize), EvmOpError> {
         use EvmOp::*;
 
-        if b.len() == 0 {
+        if b.is_empty() {
             return Err(EvmOpError::ParserErrorIncompleteInstruction);
         }
 
         let opcode = b[0];
-        if 0x60u8 <= opcode && opcode <= 0x7Fu8 {
+        if (0x60u8..=0x7Fu8).contains(&opcode) {
             // PUSH (read operand from code)
             let len = (opcode - 0x60 + 1) as usize;
 
             if 1 + len > b.len() {
-                return Err(EvmOpError::ParserErrorIncompleteInstruction);
+                Err(EvmOpError::ParserErrorIncompleteInstruction)
             } else {
                 let val =
                     U256::try_from_be_slice(&b[1..1 + len]).expect("Could not parse integer!");
-                return Ok((Push(len, val), 1 + len));
+                Ok((Push(len, val), 1 + len))
             }
         } else {
             // other opcodes
@@ -566,7 +570,7 @@ impl EvmOp {
                 _ => match mode {
                     EvmOpParserMode::Lax => Ok((Unknown(opcode), 1)),
                     EvmOpParserMode::Strict => {
-                        return Err(EvmOpError::ParserErrorUnknownInstruction(opcode));
+                        Err(EvmOpError::ParserErrorUnknownInstruction(opcode))
                     }
                 },
             }
@@ -641,7 +645,7 @@ impl EvmCode {
                 }
             }
 
-            ops.push(self.ops[idx].clone());
+            ops.push(self.ops[idx]);
             idx += 1;
         }
 

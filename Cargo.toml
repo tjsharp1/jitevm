@@ -1,45 +1,27 @@
-[package]
-name = "jitevm"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+    "bins/tracer",
+    "crates/jit-contract"
+]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
+[workspace.dependencies]
+jit-contract = { path = "crates/jit-contract" }
 alloy-primitives = "0.4"
 hex = "0.4"
-eyre = "0.6.8"
 thiserror = "1.0.31"
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master" }
 itertools = "0.10.3"
-reth = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-db = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-interfaces = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-provider = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-primitives = { git = "https://github.com/paradigmxyz/reth.git" }
-revm = { git = "https://github.com/bluealloy/revm.git", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "0d78d1eb304a2ce41ddac8f03206f5a316af247b" }
+revm = { git = "https://github.com/bluealloy/revm.git", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "1609e07c68048909ad1682c98cf2b9baa76310b5" }
 sha3 = "0.10.8"
-clap = { version = "4.4.7", features = ["derive"] }
 ruint = "1.10.1"
-
-
-[features]
-default = ["llvm16"]
-llvm14 = ["inkwell/llvm14-0"]
-llvm16 = ["inkwell/llvm16-0"]
-
-[dev-dependencies]
 criterion = "0.5.1"
 paste = "1.0.7"
 rand = "0.8.5"
 serde_json = "1.0.108"
 serde = { version = "1.0.192", features = ["derive"] }
-
-[[bench]]
-name = "evm_bench"
-harness = false
-
-[[bench]]
-name = "storage_bench"
-harness = false

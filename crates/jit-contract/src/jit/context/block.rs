@@ -95,7 +95,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -126,7 +126,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -157,7 +157,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -189,7 +189,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -221,7 +221,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -252,7 +252,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),
@@ -283,7 +283,7 @@ impl<'ctx> BlockContext {
         build_stack_check!(ctx, current, 0, 1);
 
         let book = current.book();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(&ctx, book.execution_context)?;
+        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
             ctx.types.block_context.ptr_type(AddressSpace::default()),

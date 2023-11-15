@@ -1,0 +1,31 @@
+[package]
+name = "tracer"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+alloy-primitives.workspace = true
+clap = { version = "4.4.7", features = ["derive"] }
+eyre = "0.6.8"
+hex.workspace = true
+inkwell.workspace = true
+jit-contract.workspace = true
+reth = { git = "https://github.com/paradigmxyz/reth.git" }
+reth-db.workspace = true
+reth-interfaces.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+revm.workspace = true
+revm-primitives.workspace = true
+
+[features]
+default = ["llvm16"]
+llvm14 = ["inkwell/llvm14-0", "jit-contract/llvm14"]
+llvm16 = ["inkwell/llvm16-0", "jit-contract/llvm16"]
+
+
+[[bin]]
+name = "tracer"
+path = "main.rs"

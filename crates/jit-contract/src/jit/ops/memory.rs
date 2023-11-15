@@ -10,9 +10,9 @@ use crate::jit::{
 use inkwell::{values::BasicValue, AddressSpace};
 use revm_primitives::Spec;
 
-pub(crate) fn build_mstore_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_mstore_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
@@ -47,9 +47,9 @@ pub(crate) fn build_mstore_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_mstore8_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_mstore8_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
@@ -81,9 +81,9 @@ pub(crate) fn build_mstore8_op<'a, 'ctx, SPEC: Spec>(
     Ok(())
 }
 
-pub(crate) fn build_mload_op<'a, 'ctx, SPEC: Spec>(
+pub(crate) fn build_mload_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'a, 'ctx>,
+    current: &mut CurrentInstruction<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 1, 0);
 

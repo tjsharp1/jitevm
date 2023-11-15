@@ -91,7 +91,7 @@ impl<'ctx> HostFunctions<'ctx> {
         }
     }
 
-    pub fn build_print_u64<SPEC: Spec>(
+    pub fn build_print_u64(
         &self,
         c: &BuilderContext<'ctx>,
         val: IntValue<'ctx>,
@@ -107,7 +107,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub fn build_print_u256<SPEC: Spec>(
+    pub fn build_print_u256(
         &self,
         c: &BuilderContext<'ctx>,
         val: IntValue<'ctx>,
@@ -162,7 +162,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn build_sload<'a, SPEC: Spec>(
+    pub(crate) fn build_sload<'a>(
         &self,
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
@@ -191,7 +191,7 @@ impl<'ctx> HostFunctions<'ctx> {
         Ok(())
     }
 
-    pub(crate) fn build_sstore<'a, SPEC: Spec>(
+    pub(crate) fn build_sstore<'a>(
         &self,
         ctx: &BuilderContext<'ctx>,
         current: &mut CurrentInstruction<'a, 'ctx>,
