@@ -15,12 +15,10 @@ pub(crate) fn iszero_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
-    let book = current.book();
-
     let const_0 = ctx.types.type_stackel.const_int(0, false);
     let const_1 = ctx.types.type_stackel.const_int(1, false);
 
-    let (book, val) = build_stack_pop!(ctx, book);
+    let val = build_stack_pop!(ctx, current);
     let cmp = ctx
         .builder
         .build_int_compare(IntPredicate::EQ, const_0, val, "")?;
@@ -30,11 +28,13 @@ pub(crate) fn iszero_op<'ctx, SPEC: Spec>(
         .build_select(cmp, const_1, const_0, "iszero")?
         .into_int_value();
 
-    let book = build_stack_push!(ctx, book, result);
+    build_stack_push!(ctx, current, result);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -45,9 +45,8 @@ pub(crate) fn build_byte_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let (book, i) = build_stack_pop!(ctx, book);
-    let (book, x) = build_stack_pop!(ctx, book);
+    let i = build_stack_pop!(ctx, current);
+    let x = build_stack_pop!(ctx, current);
 
     let bit_width = ctx.types.type_stackel.get_bit_width();
     let bytes = bit_width / 8;
@@ -68,10 +67,12 @@ pub(crate) fn build_byte_op<'ctx, SPEC: Spec>(
 
     let val = ctx.builder.build_select(cmp, const_0, val, "")?;
 
-    let book = build_stack_push!(ctx, book, val);
+    build_stack_push!(ctx, current, val);
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -82,9 +83,8 @@ pub(crate) fn build_arithmetic_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let (book, a) = build_stack_pop!(ctx, book);
-    let (book, b) = build_stack_pop!(ctx, book);
+    let a = build_stack_pop!(ctx, current);
+    let b = build_stack_pop!(ctx, current);
     let d = match current.op() {
         EvmOp::Add => ctx.builder.build_int_add(a, b, "")?,
         EvmOp::Sub => ctx.builder.build_int_sub(a, b, "")?,
@@ -115,10 +115,12 @@ pub(crate) fn build_arithmetic_op<'ctx, SPEC: Spec>(
         _ => d,
     };
 
-    let book = build_stack_push!(ctx, book, d);
+    build_stack_push!(ctx, current, d);
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
 
     Ok(())
 }
@@ -130,12 +132,8 @@ pub(crate) fn build_cmp_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let this = current.block();
-    let next = current.next();
-
-    let (book, a) = build_stack_pop!(ctx, book);
-    let (book, b) = build_stack_pop!(ctx, book);
+    let a = build_stack_pop!(ctx, current);
+    let b = build_stack_pop!(ctx, current);
 
     let predicate = match current.op() {
         EvmOp::Eq => IntPredicate::EQ,
@@ -147,37 +145,17 @@ pub(crate) fn build_cmp_op<'ctx, SPEC: Spec>(
     };
 
     let cmp = ctx.builder.build_int_compare(predicate, a, b, "")?;
+    let result = ctx
+        .builder
+        .build_int_cast_sign_flag(cmp, ctx.types.type_stackel, false, "")?;
 
-    let push_0 = JitEvmEngineSimpleBlock::new(
-        ctx,
-        this.block,
-        &format!("i{}: {:?} / push 0", current.idx(), current.op()),
-        &format!("_{}_0", current.idx()),
-    )?;
-    let push_1 = JitEvmEngineSimpleBlock::new(
-        ctx,
-        push_0.block,
-        &format!("i{}: {:?} / push 1", current.idx(), current.op()),
-        &format!("_{}_1", current.idx()),
-    )?;
+    build_stack_push!(ctx, current, result);
 
-    ctx.builder.position_at_end(this.block);
     ctx.builder
-        .build_conditional_branch(cmp, push_1.block, push_0.block)?;
-    push_0.add_incoming(&book, this);
-    push_1.add_incoming(&book, this);
-
-    ctx.builder.position_at_end(push_0.block);
-    let const_0 = ctx.types.type_stackel.const_int(0, false);
-    let book_0 = build_stack_push!(ctx, book, const_0);
-    ctx.builder.build_unconditional_branch(next.block)?;
-    next.add_incoming(&book_0, &push_0);
-
-    ctx.builder.position_at_end(push_1.block);
-    let const_1 = ctx.types.type_stackel.const_int(1, false);
-    let book_1 = build_stack_push!(ctx, book, const_1);
-    ctx.builder.build_unconditional_branch(next.block)?;
-    next.add_incoming(&book_1, &push_1);
+        .build_unconditional_branch(current.next().block)?;
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
 
     Ok(())
 }
@@ -189,11 +167,7 @@ pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let this = current.block();
-    let next = current.next();
-
-    let (book, x) = build_stack_pop!(ctx, book);
+    let x = build_stack_pop!(ctx, current);
 
     let const_32 = ctx.types.type_stackel.const_int(32, false);
     let cmp = ctx
@@ -202,19 +176,20 @@ pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
 
     let label = format!("i{}: Signextend / else", current.idx());
     let index = format!("_{}", current.idx());
-    let else_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &label, &index)?;
-    ctx.builder.position_at_end(this.block);
+    let else_block = JitEvmEngineSimpleBlock::new(ctx, current.block().block, &label, &index)?;
+    ctx.builder.position_at_end(current.block().block);
     ctx.builder
-        .build_conditional_branch(cmp, next.block, else_block.block)?;
+        .build_conditional_branch(cmp, current.next().block, else_block.block)?;
 
-    next.add_incoming(&book, this);
-    else_block.add_incoming(&book, this);
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
+    else_block.add_incoming(current.book_ref(), current.block());
 
     ctx.builder.position_at_end(else_block.block);
+    current.update_current_block(else_block);
 
-    let book = else_block.book();
-
-    let (book, y) = build_stack_pop!(ctx, book);
+    let y = build_stack_pop!(ctx, current);
 
     let const_1 = ctx.types.type_stackel.const_int(1, false);
     let const_7 = ctx.types.type_stackel.const_int(7, false);
@@ -239,10 +214,13 @@ pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
         .build_select(is_signed, extended, unextended, "")?
         .into_int_value();
 
-    let book = build_stack_push!(ctx, book, result);
+    build_stack_push!(ctx, current, result);
 
-    next.add_incoming(&book, &else_block);
-    ctx.builder.build_unconditional_branch(next.block)?;
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
     Ok(())
 }
 
@@ -253,10 +231,9 @@ pub(crate) fn build_mod_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 3, 0);
 
-    let book = current.book();
-    let (book, a) = build_stack_pop!(ctx, book);
-    let (book, b) = build_stack_pop!(ctx, book);
-    let (book, n) = build_stack_pop!(ctx, book);
+    let a = build_stack_pop!(ctx, current);
+    let b = build_stack_pop!(ctx, current);
+    let n = build_stack_pop!(ctx, current);
 
     let width = ctx.types.type_stackel.get_bit_width() * 2;
     let type_iup = ctx.context.custom_width_int_type(width);
@@ -289,15 +266,17 @@ pub(crate) fn build_mod_op<'ctx, SPEC: Spec>(
 
     let result = ctx.builder.build_select(cmp, const_0, result, "")?;
 
-    let book = build_stack_push!(ctx, book, result);
+    build_stack_push!(ctx, current, result);
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
 macro_rules! op2_i256_exp_bit {
-    ($ctx:ident, $book:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident) => {{
+    ($ctx:ident, $accum:ident, $base:ident, $exp:ident, $mask:ident) => {{
         let one = $ctx.types.type_stackel.const_int(1, false);
         let zero = $ctx.types.type_stackel.const_int(0, false);
 
@@ -328,11 +307,8 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
 
     // SETUP BLOCK
     let (a, exp, else_block, then_block) = {
-        let book = current.book();
-        let this = current.block();
-
-        let (book, a) = build_stack_pop!(ctx, book);
-        let (book, exp) = build_stack_pop!(ctx, book);
+        let a = build_stack_pop!(ctx, current);
+        let exp = build_stack_pop!(ctx, current);
 
         let is_zero = ctx
             .builder
@@ -340,15 +316,17 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
 
         let else_label = format!("{}: Exp / else", current.idx());
         let then_label = format!("{}: Exp / then", current.idx());
-        let else_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &else_label, &index)?;
-        let then_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &then_label, &index)?;
+        let else_block =
+            JitEvmEngineSimpleBlock::new(ctx, current.block().block, &else_label, &index)?;
+        let then_block =
+            JitEvmEngineSimpleBlock::new(ctx, current.block().block, &then_label, &index)?;
 
-        ctx.builder.position_at_end(this.block);
+        ctx.builder.position_at_end(current.block().block);
         ctx.builder
             .build_conditional_branch(is_zero, then_block.block, else_block.block)?;
 
-        else_block.add_incoming(&book, this);
-        then_block.add_incoming(&book, this);
+        else_block.add_incoming(current.book_ref(), current.block());
+        then_block.add_incoming(current.book_ref(), current.block());
 
         (a, exp, else_block, then_block)
     };
@@ -361,11 +339,10 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
         // static gas only
         build_gas_check_exp!(ctx, current);
 
-        let then_book = current.book();
-        let then_book = build_stack_push!(ctx, then_book, const_1);
+        build_stack_push!(ctx, current, const_1);
 
         let next = current.next();
-        next.add_incoming(&then_book, current.block());
+        next.add_incoming(current.book_ref(), current.block());
 
         ctx.builder.build_unconditional_branch(next.block)?;
     }
@@ -381,7 +358,7 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
     build_gas_check_exp!(ctx, current, msbyte);
 
     let else_block = current.block();
-    let else_book = else_block.book();
+    let else_book = current.book_ref();
 
     let bit = ctx.builder.build_int_mul(msbyte, const8, "")?;
     let shift = ctx.builder.build_int_sub(bit, const1, "")?;
@@ -404,9 +381,8 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
         JitEvmEngineSimpleBlock::new(ctx, loop_block.block, &loop_end_label, &index)?;
 
     let loop_book = loop_block.book();
-    let loop_end_book = loop_end_block.book();
 
-    loop_block.add_incoming(&else_book, else_block);
+    loop_block.add_incoming(else_book, else_block);
     loop_block.add_incoming(&loop_book, &loop_block);
     loop_end_block.add_incoming(&loop_book, &loop_block);
 
@@ -421,14 +397,14 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
     let mut mask = mask_phi.as_basic_value().into_int_value();
     let mut accum = accum_phi.as_basic_value().into_int_value();
 
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
-    op2_i256_exp_bit!(ctx, loop_book, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
+    op2_i256_exp_bit!(ctx, accum, a, exp, mask);
 
     mask_phi.add_incoming(&[(&mask, loop_block.block)]);
     accum_phi.add_incoming(&[(&accum, loop_block.block)]);
@@ -439,16 +415,19 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
         .build_conditional_branch(cond, loop_end_block.block, loop_block.block)?;
 
     ctx.builder.position_at_end(loop_end_block.block);
+    current.update_current_block(loop_end_block);
+
     let final_accum = ctx.builder.build_phi(ctx.types.type_stackel, "")?;
     final_accum.add_incoming(&[(&accum, loop_block.block)]);
 
     let final_basic = final_accum.as_basic_value().into_int_value();
-    let book = build_stack_push!(ctx, loop_end_book, final_basic);
+    build_stack_push!(ctx, current, final_basic);
 
-    let next = current.next();
-
-    ctx.builder.build_unconditional_branch(next.block)?;
-    next.add_incoming(&book, &loop_end_block);
+    ctx.builder
+        .build_unconditional_branch(current.next().block)?;
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
 
     Ok(())
 }
@@ -460,13 +439,14 @@ pub(crate) fn build_not_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
-    let book = current.book();
-    let (book, a) = build_stack_pop!(ctx, book);
+    let a = build_stack_pop!(ctx, current);
     let d = ctx.builder.build_not(a, "")?;
-    let book = build_stack_push!(ctx, book, d);
+    build_stack_push!(ctx, current, d);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }

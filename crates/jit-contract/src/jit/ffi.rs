@@ -130,12 +130,11 @@ impl<'ctx> HostFunctions<'ctx> {
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 2, 0);
 
-        let book = current.book();
-        let (book, offset) = build_stack_pop!(ctx, book);
-        let (book, size) = build_stack_pop!(ctx, book);
-        build_sha3_gas_check!(ctx, current, book, offset, size);
+        let offset = build_stack_pop!(ctx, current);
+        let size = build_stack_pop!(ctx, current);
+        build_sha3_gas_check!(ctx, current, offset, size);
 
-        let book = current.book();
+        let book = current.book_ref();
 
         let offset = ctx
             .builder
@@ -154,11 +153,13 @@ impl<'ctx> HostFunctions<'ctx> {
             ],
             "",
         )?;
-        let book = build_stack_inc!(ctx, book);
+        build_stack_inc!(ctx, current);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -169,7 +170,7 @@ impl<'ctx> HostFunctions<'ctx> {
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 1, 0);
 
-        let book = current.book();
+        let book = current.book_ref();
         let gas = ctx
             .builder
             .build_call(
@@ -182,12 +183,13 @@ impl<'ctx> HostFunctions<'ctx> {
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
 
-        build_sload_gas_check!(ctx, current, book, gas);
+        build_sload_gas_check!(ctx, current, gas);
 
-        let book = current.book();
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -198,7 +200,7 @@ impl<'ctx> HostFunctions<'ctx> {
     ) -> Result<(), JitEvmEngineError> {
         build_stack_check!(ctx, current, 2, 0);
 
-        let book = current.book();
+        let book = current.book_ref();
         let _ = ctx
             .builder
             .build_call(
@@ -211,16 +213,16 @@ impl<'ctx> HostFunctions<'ctx> {
             .ok_or(JitEvmEngineError::NoInstructionValue)?
             .into_int_value();
 
-        let (book, gas) = build_stack_pop!(ctx, book);
-        let (book, refund) = build_stack_pop!(ctx, book);
+        let gas = build_stack_pop!(ctx, current);
+        let refund = build_stack_pop!(ctx, current);
 
-        build_sstore_gas_check!(ctx, current, book, gas, refund);
-
-        let book = current.book();
+        build_sstore_gas_check!(ctx, current, gas, refund);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 }

@@ -189,8 +189,14 @@ macro_rules! assert_evm_jit_equivalence {
                     panic!("JIT dit not return revert when it should have!");
                 };
 
-                assert_eq!(gas_used, jit_gas_used, "REVERT: EVM and JIT gas not equivalent!");
-                assert_eq!(output, jit_output, "REVERT: EVM and JIT output not equivalent!");
+                assert_eq!(
+                    gas_used, jit_gas_used,
+                    "REVERT: EVM and JIT gas not equivalent!"
+                );
+                assert_eq!(
+                    output, jit_output,
+                    "REVERT: EVM and JIT output not equivalent!"
+                );
             }
         }
     };

@@ -14,11 +14,10 @@ pub(crate) fn build_revert_op<'ctx, SPEC: Spec>(
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let (book, offset) = build_stack_pop!(ctx, book);
-    let (book, size) = build_stack_pop!(ctx, book);
+    let offset = build_stack_pop!(ctx, current);
+    let size = build_stack_pop!(ctx, current);
 
-    build_memory_gas_check!(ctx, current, book, offset, size);
+    build_memory_gas_check!(ctx, current, offset, size);
 
     let block = current.block();
 
@@ -33,11 +32,10 @@ pub(crate) fn build_return_op<'ctx, SPEC: Spec>(
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let (book, offset) = build_stack_pop!(ctx, book);
-    let (book, size) = build_stack_pop!(ctx, book);
+    let offset = build_stack_pop!(ctx, current);
+    let size = build_stack_pop!(ctx, current);
 
-    build_memory_gas_check!(ctx, current, book, offset, size);
+    build_memory_gas_check!(ctx, current, offset, size);
 
     let block = current.block();
 

@@ -94,7 +94,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -110,11 +110,13 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ctx.types.type_stackel, ptr, "load_number")?
             .into_int_value();
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -125,7 +127,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -141,11 +143,13 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ctx.types.type_stackel, ptr, "load_coinbase")?
             .into_int_value();
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -156,7 +160,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -173,11 +177,13 @@ impl<'ctx> BlockContext {
             .build_load(ctx.types.type_stackel, ptr, "load_timestamp")?
             .into_int_value();
 
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -188,7 +194,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -205,11 +211,13 @@ impl<'ctx> BlockContext {
             .build_load(ctx.types.type_stackel, ptr, "load_difficulty")?
             .into_int_value();
 
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -220,7 +228,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -236,11 +244,13 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ctx.types.type_stackel, ptr, "load_randao")?
             .into_int_value();
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -251,7 +261,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -267,11 +277,13 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ctx.types.type_stackel, ptr, "load_basefee")?
             .into_int_value();
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
@@ -282,7 +294,7 @@ impl<'ctx> BlockContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -298,11 +310,13 @@ impl<'ctx> BlockContext {
             .builder
             .build_load(ctx.types.type_stackel, ptr, "load_gas")?
             .into_int_value();
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 }

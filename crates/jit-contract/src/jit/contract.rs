@@ -37,30 +37,21 @@ pub struct JitEvmEngineBookkeeping<'ctx> {
 }
 
 impl<'ctx> JitEvmEngineBookkeeping<'ctx> {
-    pub fn update_mem_gas(&self, mem_gas: IntValue<'ctx>, mem_size: IntValue<'ctx>) -> Self {
-        Self {
-            mem_gas,
-            mem_size,
-            ..*self
-        }
+    pub fn update_mem_gas(&mut self, mem_gas: IntValue<'ctx>, mem_size: IntValue<'ctx>) {
+        self.mem_gas = mem_gas;
+        self.mem_size = mem_size;
     }
 
-    pub fn update_sp(&self, sp: IntValue<'ctx>) -> Self {
-        Self { sp, ..*self }
+    pub fn update_sp(&mut self, sp: IntValue<'ctx>) {
+        self.sp = sp;
     }
 
-    pub fn update_gas(&self, gas_remaining: IntValue<'ctx>) -> Self {
-        Self {
-            gas_remaining,
-            ..*self
-        }
+    pub fn update_gas(&mut self, gas_remaining: IntValue<'ctx>) {
+        self.gas_remaining = gas_remaining;
     }
 
-    pub fn update_refund(&self, gas_refund: IntValue<'ctx>) -> Self {
-        Self {
-            gas_refund,
-            ..*self
-        }
+    pub fn update_refund(&mut self, gas_refund: IntValue<'ctx>) {
+        self.gas_refund = gas_refund;
     }
 }
 

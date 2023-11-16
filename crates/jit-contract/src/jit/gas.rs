@@ -8,7 +8,7 @@ const NONZERO_DATA_COST: u64 = 16;
 const INIT_TX_COST: u64 = 21000;
 
 macro_rules! build_sstore_gas_check {
-    ($ctx:ident, $current:ident, $book:ident, $gas_cost:ident, $refund:ident) => {
+    ($ctx:ident, $current:ident, $gas_cost:ident, $refund:ident) => {
         use crate::jit::{
             context::{JitContractExecutionResult, JitContractResultCode},
             contract::JitEvmEngineSimpleBlock,
@@ -23,6 +23,7 @@ macro_rules! build_sstore_gas_check {
             )
             .expect("Expect intrinsic declaration not found!");
         let const_true = $ctx.types.type_bool.const_int(1, false);
+        let book = $current.book_ref();
 
         let gas_cost = $ctx
             .builder
@@ -30,7 +31,7 @@ macro_rules! build_sstore_gas_check {
         // TODO: this OR gas_remaining < 2300 (istanbul fork)
         let cmp =
             $ctx.builder
-                .build_int_compare(IntPredicate::UGE, $book.gas_remaining, gas_cost, "")?;
+                .build_int_compare(IntPredicate::UGE, book.gas_remaining, gas_cost, "")?;
         let cmp = $ctx
             .builder
             .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
@@ -41,21 +42,21 @@ macro_rules! build_sstore_gas_check {
 
         let sub_gas = $ctx
             .builder
-            .build_select(cmp, gas_cost, $book.gas_remaining, "")?
+            .build_select(cmp, gas_cost, book.gas_remaining, "")?
             .into_int_value();
         let remaining = $ctx
             .builder
-            .build_int_sub($book.gas_remaining, sub_gas, "deduct_gas")?;
+            .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
 
         let refund = $ctx
             .builder
             .build_int_cast($refund, $ctx.types.type_i64, "")?;
         let refund = $ctx
             .builder
-            .build_int_add($book.gas_refund, refund, "add_refund_amount")?;
+            .build_int_add(book.gas_refund, refund, "add_refund_amount")?;
 
-        let book = $book.update_refund(refund);
-        let book = book.update_gas(remaining);
+        $current.book_ref_mut().update_refund(refund);
+        $current.book_ref_mut().update_gas(remaining);
 
         let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
@@ -67,8 +68,8 @@ macro_rules! build_sstore_gas_check {
         let error_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
-        error_block.add_incoming(&book, $current.block());
+        next_block.add_incoming($current.book_ref(), $current.block());
+        error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
         JitContractExecutionResult::build_exit_halt(
@@ -87,7 +88,7 @@ macro_rules! build_sstore_gas_check {
 }
 
 macro_rules! build_sload_gas_check {
-    ($ctx:ident, $current:ident, $book:ident, $gas_cost:ident) => {
+    ($ctx:ident, $current:ident, $gas_cost:ident) => {
         use crate::jit::{
             context::{JitContractExecutionResult, JitContractResultCode},
             contract::JitEvmEngineSimpleBlock,
@@ -103,12 +104,10 @@ macro_rules! build_sload_gas_check {
             .expect("Expect intrinsic declaration not found!");
         let const_true = $ctx.types.type_bool.const_int(1, false);
 
-        let cmp = $ctx.builder.build_int_compare(
-            IntPredicate::UGE,
-            $book.gas_remaining,
-            $gas_cost,
-            "",
-        )?;
+        let book = $current.book_ref();
+        let cmp =
+            $ctx.builder
+                .build_int_compare(IntPredicate::UGE, book.gas_remaining, $gas_cost, "")?;
         let cmp = $ctx
             .builder
             .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
@@ -119,12 +118,12 @@ macro_rules! build_sload_gas_check {
 
         let sub_gas = $ctx
             .builder
-            .build_select(cmp, $gas_cost, $book.gas_remaining, "")?
+            .build_select(cmp, $gas_cost, book.gas_remaining, "")?
             .into_int_value();
         let remaining = $ctx
             .builder
-            .build_int_sub($book.gas_remaining, sub_gas, "deduct_gas")?;
-        let book = $book.update_gas(remaining);
+            .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
+        $current.book_ref_mut().update_gas(remaining);
 
         let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
@@ -136,8 +135,8 @@ macro_rules! build_sload_gas_check {
         let error_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
-        error_block.add_incoming(&book, $current.block());
+        next_block.add_incoming($current.book_ref(), $current.block());
+        error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
         JitContractExecutionResult::build_exit_halt(
@@ -156,14 +155,16 @@ macro_rules! build_sload_gas_check {
 }
 
 macro_rules! build_sha3_gas_check {
-    ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {
+    ($ctx:ident, $current:ident, $offset:ident, $len:ident) => {
         use crate::jit::{
             context::{JitContractExecutionResult, JitContractResultCode},
             contract::JitEvmEngineSimpleBlock,
         };
         use inkwell::{intrinsics::Intrinsic, IntPredicate};
 
-        let (book, expansion_cost) = memory_expansion_cost!($ctx, $current, $book, $offset, $len);
+        let expansion_cost = memory_expansion_cost!($ctx, $current, $offset, $len);
+
+        let book = $current.book_ref();
 
         let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
         let expect_fn = expect
@@ -218,7 +219,7 @@ macro_rules! build_sha3_gas_check {
         let remaining = $ctx
             .builder
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
-        let book = book.update_gas(remaining);
+        $current.book_ref_mut().update_gas(remaining);
 
         let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
@@ -230,8 +231,8 @@ macro_rules! build_sha3_gas_check {
         let error_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
-        error_block.add_incoming(&book, $current.block());
+        next_block.add_incoming($current.book_ref(), $current.block());
+        error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
         JitContractExecutionResult::build_exit_halt(
@@ -250,7 +251,7 @@ macro_rules! build_sha3_gas_check {
 }
 
 macro_rules! memory_expansion_cost {
-    ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {{
+    ($ctx:ident, $current:ident, $offset:ident, $len:ident) => {{
         let mem_gas = memory_gas::<SPEC>();
 
         let const_0 = $ctx.types.type_i64.const_int(0, false);
@@ -271,17 +272,18 @@ macro_rules! memory_expansion_cost {
         let i4 = $ctx.builder.build_and(i3, const_31, "")?;
         let new_size = $ctx.builder.build_int_add(i0, i4, "")?;
 
+        let book = $current.book_ref();
         let iszero =
             $ctx.builder
                 .build_int_compare(IntPredicate::EQ, len, const_0, "len_is_zero")?;
         let new_size = $ctx
             .builder
-            .build_select(iszero, $book.mem_size, new_size, "new_size")?
+            .build_select(iszero, book.mem_size, new_size, "new_size")?
             .into_int_value();
 
         let has_grown =
             $ctx.builder
-                .build_int_compare(IntPredicate::UGT, new_size, $book.mem_size, "")?;
+                .build_int_compare(IntPredicate::UGT, new_size, book.mem_size, "")?;
 
         let size_word = $ctx
             .builder
@@ -293,7 +295,7 @@ macro_rules! memory_expansion_cost {
         let size_1 = $ctx.builder.build_int_mul(const_mem_gas, size_word, "")?;
         let mem_gas = $ctx.builder.build_int_add(size_0, size_1, "")?;
 
-        let gas_diff = $ctx.builder.build_int_sub(mem_gas, $book.mem_gas, "")?;
+        let gas_diff = $ctx.builder.build_int_sub(mem_gas, book.mem_gas, "")?;
 
         let expansion_cost = $ctx
             .builder
@@ -301,25 +303,25 @@ macro_rules! memory_expansion_cost {
             .into_int_value();
         let new_size = $ctx
             .builder
-            .build_select(has_grown, new_size, $book.mem_size, "")?
+            .build_select(has_grown, new_size, book.mem_size, "")?
             .into_int_value();
         let new_gas = $ctx
             .builder
-            .build_select(has_grown, mem_gas, $book.mem_gas, "")?
+            .build_select(has_grown, mem_gas, book.mem_gas, "")?
             .into_int_value();
 
-        let book = $book.update_mem_gas(new_gas, new_size);
+        $current.book_ref_mut().update_mem_gas(new_gas, new_size);
 
-        (book, expansion_cost)
+        expansion_cost
     }};
 }
 
 macro_rules! build_memory_gas_check {
-    ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:literal) => {
+    ($ctx:ident, $current:ident, $offset:ident, $len:literal) => {
         let len = $ctx.types.type_i64.const_int($len, false);
-        build_memory_gas_check!($ctx, $current, $book, $offset, len);
+        build_memory_gas_check!($ctx, $current, $offset, len);
     };
-    ($ctx:ident, $current:ident, $book:ident, $offset:ident, $len:ident) => {
+    ($ctx:ident, $current:ident, $offset:ident, $len:ident) => {
         use crate::jit::{
             context::{JitContractExecutionResult, JitContractResultCode},
             contract::JitEvmEngineSimpleBlock,
@@ -336,11 +338,12 @@ macro_rules! build_memory_gas_check {
             )
             .expect("Expect intrinsic declaration not found!");
 
-        let (book, expansion_cost) = memory_expansion_cost!($ctx, $current, $book, $offset, $len);
+        let expansion_cost = memory_expansion_cost!($ctx, $current, $offset, $len);
         let const_cost = const_cost::<SPEC>($current.op());
         let const_cost = $ctx.types.type_i64.const_int(const_cost, false);
         let gas_cost = $ctx.builder.build_int_add(const_cost, expansion_cost, "")?;
 
+        let book = $current.book_ref();
         let cmp =
             $ctx.builder
                 .build_int_compare(IntPredicate::UGE, book.gas_remaining, gas_cost, "")?;
@@ -359,7 +362,7 @@ macro_rules! build_memory_gas_check {
         let remaining = $ctx
             .builder
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
-        let book = book.update_gas(remaining);
+        $current.book_ref_mut().update_gas(remaining);
 
         let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
@@ -371,8 +374,8 @@ macro_rules! build_memory_gas_check {
         let error_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
-        error_block.add_incoming(&book, $current.block());
+        next_block.add_incoming($current.book_ref(), $current.block());
+        error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
         JitContractExecutionResult::build_exit_halt(
@@ -407,7 +410,7 @@ macro_rules! build_gas_check {
             .expect("Expect intrinsic declaration not found!");
         let const_true = $ctx.types.type_bool.const_int(1, false);
 
-        let book = $current.book();
+        let book = $current.book_ref();
 
         let gas_cost = const_cost::<SPEC>($current.op());
         let gas_cost = $ctx.types.type_i64.const_int(gas_cost, false);
@@ -430,7 +433,7 @@ macro_rules! build_gas_check {
         let remaining = $ctx
             .builder
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
-        let book = book.update_gas(remaining);
+        $current.book_ref_mut().update_gas(remaining);
 
         let instruction_label = format!("i{}_enough_gas", $current.idx());
         let idx = format!("_{}", $current.idx());
@@ -442,8 +445,8 @@ macro_rules! build_gas_check {
         let error_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
-        error_block.add_incoming(&book, $current.block());
+        next_block.add_incoming($current.book_ref(), $current.block());
+        error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
         JitContractExecutionResult::build_exit_halt(
@@ -482,7 +485,7 @@ macro_rules! build_gas_check_exp {
             .expect("Expect intrinsic declaration not found!");
         let const_true = $ctx.types.type_bool.const_int(1, false);
 
-        let book = $current.book();
+        let book = $current.book_ref();
 
         let (base_gas, byte_gas) = exp_cost::<SPEC>();
         let base_gas_cost = $ctx.types.type_i64.const_int(base_gas, false);
@@ -514,7 +517,7 @@ macro_rules! build_gas_check_exp {
         let remaining = $ctx
             .builder
             .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
-        let book = book.update_gas(remaining);
+        $current.book_ref_mut().update_gas(remaining);
 
         let block_name = $current
             .block()
@@ -533,8 +536,8 @@ macro_rules! build_gas_check_exp {
         let error_block =
             JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
 
-        next_block.add_incoming(&book, $current.block());
-        error_block.add_incoming(&book, $current.block());
+        next_block.add_incoming($current.book_ref(), $current.block());
+        error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
         JitContractExecutionResult::build_exit_halt(
@@ -609,7 +612,6 @@ fn sstore_cost<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool)
 
 fn sstore_refund<SPEC: Spec>(original: U256, current: U256, new: U256, warm: bool) -> i64 {
     if SPEC::enabled(SpecId::LATEST) {
-
         #[allow(clippy::collapsible_else_if)]
         if current == new {
             0

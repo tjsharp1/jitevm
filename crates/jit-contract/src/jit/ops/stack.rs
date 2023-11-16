@@ -16,16 +16,17 @@ pub(crate) fn build_push_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 0, 1);
 
-    let book = current.book();
     let val = ctx
         .types
         .type_stackel
         .const_int_arbitrary_precision(&val.into_limbs());
-    let book = build_stack_push!(ctx, book, val);
+    build_stack_push!(ctx, current, val);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -36,12 +37,13 @@ pub(crate) fn build_pop_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
-    let book = current.book();
-    let (book, _) = build_stack_pop!(ctx, book);
+    let _ = build_stack_pop!(ctx, current);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -68,7 +70,7 @@ macro_rules! build_stack_check {
         let const_true = $ctx.types.type_bool.const_int(1, false);
 
         if $min_stack > 0 {
-            let book = $current.book();
+            let book = $current.book_ref();
             let min_stack = $min_stack * EVM_STACK_ELEMENT_SIZE;
             let const_min_stack = $ctx.types.type_i64.const_int(min_stack, false);
             let min_sp = $ctx
@@ -122,7 +124,7 @@ macro_rules! build_stack_check {
         }
 
         if $growth > 0 {
-            let book = $current.book();
+            let book = $current.book_ref();
             let need_stack = $growth * EVM_STACK_ELEMENT_SIZE;
             let const_need_stack = $ctx.types.type_i64.const_int(need_stack, false);
             let max_sp = $ctx
@@ -178,34 +180,36 @@ macro_rules! build_stack_check {
 }
 
 macro_rules! build_stack_push {
-    ($ctx:expr, $book:ident, $val:ident) => {{
+    ($ctx:expr, $current:ident, $val:ident) => {{
         use crate::jit::EVM_STACK_ELEMENT_SIZE;
         let sp_offset = $ctx
             .types
             .type_ptrint
             .const_int(EVM_STACK_ELEMENT_SIZE, false);
 
+        let book = $current.book_ref();
         let sp_ptr = $ctx.builder.build_int_to_ptr(
-            $book.sp,
+            book.sp,
             $ctx.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         $ctx.builder.build_store(sp_ptr, $val)?;
-        let sp = $ctx.builder.build_int_add($book.sp, sp_offset, "")?;
+        let sp = $ctx.builder.build_int_add(book.sp, sp_offset, "")?;
 
-        $book.update_sp(sp)
+        $current.book_ref_mut().update_sp(sp);
     }};
 }
 
 macro_rules! build_stack_pop {
-    ($ctx:expr, $book:ident) => {{
+    ($ctx:expr, $current:ident) => {{
         use crate::jit::EVM_STACK_ELEMENT_SIZE;
         let sp_offset = $ctx
             .types
             .type_ptrint
             .const_int(EVM_STACK_ELEMENT_SIZE, false);
 
-        let sp = $ctx.builder.build_int_sub($book.sp, sp_offset, "")?;
+        let book = $current.book_ref();
+        let sp = $ctx.builder.build_int_sub(book.sp, sp_offset, "")?;
         let sp_ptr = $ctx.builder.build_int_to_ptr(
             sp,
             $ctx.types.type_stackel.ptr_type(AddressSpace::default()),
@@ -216,32 +220,34 @@ macro_rules! build_stack_pop {
             .build_load($ctx.types.type_stackel, sp_ptr, "")?
             .into_int_value();
 
-        ($book.update_sp(sp), val)
+        $current.book_ref_mut().update_sp(sp);
+        val
     }};
 }
 
 macro_rules! build_stack_push_vector {
-    ($ctx:expr, $book:ident, $val:ident) => {{
+    ($ctx:expr, $current:ident, $val:ident) => {{
         use crate::jit::EVM_STACK_ELEMENT_SIZE;
         let sp_offset = $ctx
             .types
             .type_ptrint
             .const_int(EVM_STACK_ELEMENT_SIZE, false);
 
+        let book = $current.book_ref();
         let sp_ptr = $ctx.builder.build_int_to_ptr(
-            $book.sp,
+            book.sp,
             $ctx.types.type_rvec.ptr_type(AddressSpace::default()),
             "",
         )?;
         $ctx.builder.build_store(sp_ptr, $val)?;
-        let sp = $ctx.builder.build_int_add($book.sp, sp_offset, "")?;
+        let sp = $ctx.builder.build_int_add(book.sp, sp_offset, "")?;
 
-        $book.update_sp(sp)
+        $current.book_ref_mut().update_sp(sp);
     }};
 }
 
 macro_rules! build_stack_pop_vector {
-    ($ctx:expr, $book:ident) => {{
+    ($ctx:expr, $current:ident) => {{
         use crate::jit::{EVM_JIT_STACK_ALIGN, EVM_STACK_ELEMENT_SIZE};
         let sp0_offset = $ctx
             .types
@@ -252,8 +258,9 @@ macro_rules! build_stack_pop_vector {
             .type_ptrint
             .const_int(EVM_JIT_STACK_ALIGN as u64, false);
 
-        let sp0 = $ctx.builder.build_int_sub($book.sp, sp0_offset, "")?;
-        let sp1 = $ctx.builder.build_int_sub($book.sp, sp1_offset, "")?;
+        let book = $current.book_ref();
+        let sp0 = $ctx.builder.build_int_sub(book.sp, sp0_offset, "")?;
+        let sp1 = $ctx.builder.build_int_sub(book.sp, sp1_offset, "")?;
 
         let sp0_ptr = $ctx.builder.build_int_to_ptr(
             sp0,
@@ -275,52 +282,55 @@ macro_rules! build_stack_pop_vector {
             .build_load($ctx.types.type_ivec, sp1_ptr, "")?
             .into_vector_value();
 
-        ($book.update_sp(sp0), vec0, vec1)
+        $current.book_ref_mut().update_sp(sp0);
+        (vec0, vec1)
     }};
 }
 
 macro_rules! build_stack_inc {
-    ($ctx:expr, $book:ident) => {{
+    ($ctx:expr, $current:ident) => {{
         use crate::jit::EVM_STACK_ELEMENT_SIZE;
         let sp_offset = $ctx
             .types
             .type_ptrint
             .const_int(EVM_STACK_ELEMENT_SIZE, false);
-        let sp = $ctx.builder.build_int_add($book.sp, sp_offset, "")?;
 
-        $book.update_sp(sp)
+        let book = $current.book_ref();
+        let sp = $ctx.builder.build_int_add(book.sp, sp_offset, "")?;
+
+        $current.book_ref_mut().update_sp(sp);
     }};
 }
 
 macro_rules! build_stack_write {
-    ($ctx:expr, $book:ident, $idx:expr, $val:ident) => {{
+    ($ctx:expr, $current:ident, $idx:expr, $val:ident) => {{
         use crate::jit::EVM_STACK_ELEMENT_SIZE;
         let idx = $ctx
             .types
             .type_ptrint
             .const_int($idx * EVM_STACK_ELEMENT_SIZE, false);
 
-        let sp_int = $ctx.builder.build_int_sub($book.sp, idx, "")?;
+        let book = $current.book_ref();
+        let sp_int = $ctx.builder.build_int_sub(book.sp, idx, "")?;
         let sp_ptr = $ctx.builder.build_int_to_ptr(
             sp_int,
             $ctx.types.type_stackel.ptr_type(AddressSpace::default()),
             "",
         )?;
         $ctx.builder.build_store(sp_ptr, $val)?;
-
-        $book
     }};
 }
 
 macro_rules! build_stack_read {
-    ($ctx:expr, $book:ident, $idx:expr) => {{
+    ($ctx:expr, $current:ident, $idx:expr) => {{
         use crate::jit::EVM_STACK_ELEMENT_SIZE;
         let idx = $ctx
             .types
             .type_ptrint
             .const_int($idx * EVM_STACK_ELEMENT_SIZE, false);
 
-        let sp_int = $ctx.builder.build_int_sub($book.sp, idx, "")?;
+        let book = $current.book_ref();
+        let sp_int = $ctx.builder.build_int_sub(book.sp, idx, "")?;
         let sp_ptr = $ctx.builder.build_int_to_ptr(
             sp_int,
             $ctx.types.type_stackel.ptr_type(AddressSpace::default()),
@@ -331,7 +341,7 @@ macro_rules! build_stack_read {
             .build_load($ctx.types.type_stackel, sp_ptr, "")?
             .into_int_value();
 
-        ($book, val)
+        val
     }};
 }
 
@@ -349,15 +359,16 @@ pub(crate) fn build_stack_swap_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, idx, 0);
 
-    let book = current.book();
-    let (book, a) = build_stack_read!(ctx, book, 1);
-    let (book, b) = build_stack_read!(ctx, book, idx);
-    let book = build_stack_write!(ctx, book, 1, b);
-    let book = build_stack_write!(ctx, book, idx, a);
+    let a = build_stack_read!(ctx, current, 1);
+    let b = build_stack_read!(ctx, current, idx);
+    build_stack_write!(ctx, current, 1, b);
+    build_stack_write!(ctx, current, idx, a);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
 
     Ok(())
 }
@@ -378,7 +389,7 @@ pub(crate) fn build_dup_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, idx, 1);
 
-    let book = current.book();
+    let book = current.book_ref();
     let len_stackel = ctx
         .types
         .type_ptrint
@@ -407,11 +418,13 @@ pub(crate) fn build_dup_op<'ctx, SPEC: Spec>(
     )?;
     let sp = ctx.builder.build_int_add(book.sp, len_stackel, "")?;
 
-    let book = book.update_sp(sp);
+    current.book_ref_mut().update_sp(sp);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 

@@ -23,6 +23,7 @@ pub trait LendingIterator: for<'this> LendingIteratorLifetime<'this> {
 pub(crate) struct CurrentInstruction<'a, 'ctx> {
     idx: usize,
     current_block: Option<JitEvmEngineSimpleBlock<'ctx>>,
+    current_book: JitEvmEngineBookkeeping<'ctx>,
     render: &'a InstructionCursor<'ctx>,
 }
 
@@ -30,7 +31,13 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
     pub fn step(&mut self) -> bool {
         self.current_block = None;
         self.idx += 1;
-        self.idx < self.render.instructions.len()
+
+        let instruction_len = self.render.instructions.len();
+        if self.idx < instruction_len {
+            self.current_book = self.render.instructions[self.idx].book();
+        }
+
+        self.idx < instruction_len
     }
 
     pub fn idx(&self) -> usize {
@@ -44,6 +51,7 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
     }
 
     pub fn update_current_block(&mut self, block: JitEvmEngineSimpleBlock<'ctx>) {
+        self.current_book = block.book();
         self.current_block = Some(block);
     }
 
@@ -61,8 +69,12 @@ impl<'a, 'ctx> CurrentInstruction<'a, 'ctx> {
         self.render.code.code.ops[self.idx]
     }
 
-    pub fn book(&self) -> JitEvmEngineBookkeeping<'ctx> {
-        self.block().book()
+    pub fn book_ref_mut(&mut self) -> &mut JitEvmEngineBookkeeping<'ctx> {
+        &mut self.current_book
+    }
+
+    pub fn book_ref(&self) -> &JitEvmEngineBookkeeping<'ctx> {
+        &self.current_book
     }
 
     pub fn code(&self) -> &IndexedEvmCode {
@@ -81,11 +93,15 @@ pub(crate) struct Iter<'a, 'ctx> {
 
 impl<'a, 'ctx> Iter<'a, 'ctx> {
     pub fn new(render: &'a InstructionCursor<'ctx>) -> Self {
+        let idx = 0;
+        let current_book = render.instructions[idx].book();
+
         Self {
             init: true,
             current: CurrentInstruction {
-                idx: 0,
+                idx,
                 current_block: None,
+                current_book,
                 render,
             },
         }

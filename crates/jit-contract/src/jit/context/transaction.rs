@@ -118,8 +118,7 @@ impl<'ctx> TransactionContext {
         ctx: &BuilderContext<'ctx>,
         execution_context: IntValue<'ctx>,
     ) -> Result<IntValue<'ctx>, JitEvmEngineError> {
-        let tx_context_ptr =
-            JitEvmPtrs::build_get_transaction_context_ptr(ctx, execution_context)?;
+        let tx_context_ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             tx_context_ptr,
             ctx.types
@@ -151,12 +150,13 @@ impl<'ctx> TransactionContext {
         let size = current.code().len as u64;
         let value = ctx.types.type_stackel.const_int(size, false);
 
-        let book = current.book();
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
 
         Ok(())
     }
@@ -168,7 +168,7 @@ impl<'ctx> TransactionContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -187,11 +187,13 @@ impl<'ctx> TransactionContext {
             .build_load(ctx.types.type_stackel, ptr, "load_value")?
             .into_int_value();
 
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
 
         Ok(())
     }
@@ -203,7 +205,7 @@ impl<'ctx> TransactionContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -222,11 +224,13 @@ impl<'ctx> TransactionContext {
             .build_load(ctx.types.type_stackel, ptr, "load_caller")?
             .into_int_value();
 
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
 
         Ok(())
     }
@@ -238,7 +242,7 @@ impl<'ctx> TransactionContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_transaction_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
             ptr,
@@ -257,11 +261,13 @@ impl<'ctx> TransactionContext {
             .build_load(ctx.types.type_stackel, ptr, "load_origin")?
             .into_int_value();
 
-        let book = build_stack_push!(ctx, book, value);
+        build_stack_push!(ctx, current, value);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
 
         Ok(())
     }
@@ -273,9 +279,9 @@ impl<'ctx> TransactionContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 1, 1);
 
-        let book = current.book();
-        let (book, offset) = build_stack_pop!(ctx, book);
+        let offset = build_stack_pop!(ctx, current);
 
+        let book = current.book_ref();
         let len = JitEvmPtrs::build_get_calldatalen(ctx, book.execution_context)?;
         let ptr = JitEvmPtrs::build_get_calldata_ptr(ctx, book.execution_context)?;
 
@@ -313,7 +319,9 @@ impl<'ctx> TransactionContext {
         let const_0 = ctx.types.type_i8.const_int(0, false);
         let const_32 = ctx.types.type_ptrint.const_int(32, false);
 
-        let ptr = ctx.builder.build_ptr_to_int(ptr, ctx.types.type_ptrint, "")?;
+        let ptr = ctx
+            .builder
+            .build_ptr_to_int(ptr, ctx.types.type_ptrint, "")?;
         let src_ptr = ctx.builder.build_int_add(ptr, offset, "")?;
         let src_ptr = ctx.builder.build_int_to_ptr(
             src_ptr,
@@ -364,11 +372,13 @@ impl<'ctx> TransactionContext {
             .builder
             .build_shuffle_vector(v0, v1, ctx.types.swap_bytes, "")?;
 
-        let book = build_stack_push_vector!(ctx, book, shuffled);
+        build_stack_push_vector!(ctx, current, shuffled);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
 
         Ok(())
     }
@@ -380,15 +390,17 @@ impl<'ctx> TransactionContext {
         build_gas_check!(ctx, current);
         build_stack_check!(ctx, current, 0, 1);
 
-        let book = current.book();
+        let book = current.book_ref();
 
         let len = JitEvmPtrs::build_get_calldatalen(ctx, book.execution_context)?;
 
-        let book = build_stack_push!(ctx, book, len);
+        build_stack_push!(ctx, current, len);
 
         ctx.builder
             .build_unconditional_branch(current.next().block)?;
-        current.next().add_incoming(&book, current.block());
+        current
+            .next()
+            .add_incoming(current.book_ref(), current.block());
 
         Ok(())
     }

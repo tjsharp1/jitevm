@@ -8,7 +8,7 @@ use inkwell::{
     values::{IntValue, PointerValue},
     AddressSpace,
 };
-use revm_primitives::{Bytes, db::Database, Spec, State};
+use revm_primitives::{db::Database, Bytes, Spec, State};
 
 mod block;
 mod result;

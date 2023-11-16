@@ -16,12 +16,12 @@ pub(crate) fn build_mstore_op<'ctx, SPEC: Spec>(
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let (book, offset) = build_stack_pop!(ctx, book);
-    build_memory_gas_check!(ctx, current, book, offset, 32);
+    let offset = build_stack_pop!(ctx, current);
+    build_memory_gas_check!(ctx, current, offset, 32);
 
-    let book = current.book();
-    let (book, vec0, vec1) = build_stack_pop_vector!(ctx, book);
+    let (vec0, vec1) = build_stack_pop_vector!(ctx, current);
+
+    let book = current.book_ref();
 
     let shuffled = ctx
         .builder
@@ -43,7 +43,9 @@ pub(crate) fn build_mstore_op<'ctx, SPEC: Spec>(
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -53,13 +55,12 @@ pub(crate) fn build_mstore8_op<'ctx, SPEC: Spec>(
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
-    let (book, offset) = build_stack_pop!(ctx, book);
-    let (book, value) = build_stack_pop!(ctx, book);
+    let offset = build_stack_pop!(ctx, current);
+    let value = build_stack_pop!(ctx, current);
 
-    build_memory_gas_check!(ctx, current, book, offset, 1);
+    build_memory_gas_check!(ctx, current, offset, 1);
 
-    let book = current.book();
+    let book = current.book_ref();
 
     let value_casted = ctx.builder.build_int_cast(value, ctx.types.type_i8, "")?;
     let offset_casted = ctx
@@ -77,7 +78,9 @@ pub(crate) fn build_mstore8_op<'ctx, SPEC: Spec>(
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -87,12 +90,11 @@ pub(crate) fn build_mload_op<'ctx, SPEC: Spec>(
 ) -> Result<(), JitEvmEngineError> {
     build_stack_check!(ctx, current, 1, 0);
 
-    let book = current.book();
-    let (book, offset) = build_stack_pop!(ctx, book);
+    let offset = build_stack_pop!(ctx, current);
 
-    build_memory_gas_check!(ctx, current, book, offset, 32);
+    build_memory_gas_check!(ctx, current, offset, 32);
 
-    let book = current.book();
+    let book = current.book_ref();
 
     let casted = ctx
         .builder
@@ -136,10 +138,12 @@ pub(crate) fn build_mload_op<'ctx, SPEC: Spec>(
         .builder
         .build_shuffle_vector(vec0, vec1, ctx.types.swap_bytes, "")?;
 
-    let book = build_stack_push_vector!(ctx, book, shuffled);
+    build_stack_push_vector!(ctx, current, shuffled);
 
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }

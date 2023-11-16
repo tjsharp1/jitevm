@@ -26,11 +26,11 @@ pub(crate) fn build_jumpdest_op<'ctx, SPEC: Spec>(
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
 
-    let book = current.book();
-
     ctx.builder
         .build_unconditional_branch(current.next().block)?;
-    current.next().add_incoming(&book, current.block());
+    current
+        .next()
+        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
@@ -41,11 +41,11 @@ pub(crate) fn build_jump_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
-    let book = current.book();
+    let target = build_stack_pop!(ctx, current);
+
+    let book = current.book_ref();
     let code = current.code();
     let this = current.block();
-
-    let (book, target) = build_stack_pop!(ctx, book);
 
     if code.jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
@@ -75,7 +75,7 @@ pub(crate) fn build_jump_op<'ctx, SPEC: Spec>(
         ctx.builder.position_at_end(this.block);
         ctx.builder
             .build_unconditional_branch(jump_table[0].block)?;
-        jump_table[0].add_incoming(&book, this);
+        jump_table[0].add_incoming(book, this);
 
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
@@ -104,8 +104,8 @@ pub(crate) fn build_jump_op<'ctx, SPEC: Spec>(
                     instructions[*jmp_i].block,
                     error_block.block,
                 )?;
-                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                error_block.add_incoming(&book, &jump_table[j]);
+                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
+                error_block.add_incoming(book, &jump_table[j]);
                 ctx.builder.position_at_end(error_block.block);
                 JitContractExecutionResult::build_exit_halt(
                     ctx,
@@ -118,8 +118,8 @@ pub(crate) fn build_jump_op<'ctx, SPEC: Spec>(
                     instructions[*jmp_i].block,
                     jump_table[j + 1].block,
                 )?;
-                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                jump_table[j + 1].add_incoming(&book, &jump_table[j]);
+                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
+                jump_table[j + 1].add_incoming(book, &jump_table[j]);
             }
         }
     }
@@ -134,13 +134,13 @@ pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 2, 0);
 
-    let book = current.book();
+    let target = build_stack_pop!(ctx, current);
+    let val = build_stack_pop!(ctx, current);
+
+    let book = current.book_ref();
     let code = current.code();
     let this = current.block();
     let next = current.next();
-
-    let (book, target) = build_stack_pop!(ctx, book);
-    let (book, val) = build_stack_pop!(ctx, book);
 
     if code.jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
@@ -176,8 +176,8 @@ pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
         )?;
         ctx.builder
             .build_conditional_branch(cmp, next.block, jump_table[0].block)?;
-        next.add_incoming(&book, this);
-        jump_table[0].add_incoming(&book, this);
+        next.add_incoming(book, this);
+        jump_table[0].add_incoming(book, this);
 
         let instructions = current.instructions();
         for (j, jmp_i) in code.jumpdests.iter().enumerate() {
@@ -207,8 +207,8 @@ pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
                     error_block.block,
                 )?;
 
-                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                error_block.add_incoming(&book, &jump_table[j]);
+                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
+                error_block.add_incoming(book, &jump_table[j]);
                 ctx.builder.position_at_end(error_block.block);
                 JitContractExecutionResult::build_exit_halt(
                     ctx,
@@ -221,8 +221,8 @@ pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
                     instructions[*jmp_i].block,
                     jump_table[j + 1].block,
                 )?;
-                instructions[*jmp_i].add_incoming(&book, &jump_table[j]);
-                jump_table[j + 1].add_incoming(&book, &jump_table[j]);
+                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
+                jump_table[j + 1].add_incoming(book, &jump_table[j]);
             }
         }
     }
@@ -236,7 +236,7 @@ pub(crate) fn build_augmented_jump_op<'ctx, SPEC: Spec>(
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
     build_gas_check!(ctx, current);
-    let book = current.book();
+    let book = current.book_ref();
     let code = current.code();
     let this = current.block();
     let instructions = current.instructions();
@@ -250,7 +250,7 @@ pub(crate) fn build_augmented_jump_op<'ctx, SPEC: Spec>(
         // ... and jump to there!
         ctx.builder
             .build_unconditional_branch(instructions[jmp_i].block)?;
-        instructions[jmp_i].add_incoming(&book, this);
+        instructions[jmp_i].add_incoming(book, this);
     }
     Ok(())
 }
@@ -263,13 +263,13 @@ pub(crate) fn build_augmented_jumpi_op<'ctx, SPEC: Spec>(
     build_gas_check!(ctx, current);
     build_stack_check!(ctx, current, 1, 0);
 
-    let book = current.book();
+    let condition = build_stack_pop!(ctx, current);
+
+    let book = current.book_ref();
     let code = current.code();
     let this = current.block();
     let next = current.next();
     let instructions = current.instructions();
-
-    let (book, condition) = build_stack_pop!(ctx, book);
 
     if code.jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
@@ -286,8 +286,8 @@ pub(crate) fn build_augmented_jumpi_op<'ctx, SPEC: Spec>(
         )?;
         ctx.builder
             .build_conditional_branch(cmp, next.block, instructions[jmp_i].block)?;
-        next.add_incoming(&book, this);
-        instructions[jmp_i].add_incoming(&book, this);
+        next.add_incoming(book, this);
+        instructions[jmp_i].add_incoming(book, this);
     }
 
     Ok(())
