@@ -7,6 +7,7 @@ use crate::{
         error::JitEvmEngineError,
         gas::init_gas,
         ops,
+        tracing::{Tracers, TracingOptions},
         types::JitTypes,
         ExecutionResult,
     },
@@ -217,6 +218,7 @@ pub struct JitContractBuilder<'ctx> {
     pub debug_asm: Option<String>,
     pub host_functions: jit::HostFunctions<'ctx>,
     pub execution_engine: ExecutionEngine<'ctx>,
+    pub tracing_options: TracingOptions,
 }
 
 impl<'ctx> JitContractBuilder<'ctx> {
@@ -243,7 +245,13 @@ impl<'ctx> JitContractBuilder<'ctx> {
             debug_ir: None,
             debug_asm: None,
             host_functions,
+            tracing_options: TracingOptions::default(),
         })
+    }
+
+    pub fn cycle_breakpoint(mut self, cycles: u64) -> Self {
+        self.tracing_options.cycle_breakpoint = Some(cycles);
+        self
     }
 
     pub fn debug_ir(mut self, filename: &str) -> Self {
@@ -267,8 +275,10 @@ impl<'ctx> JitContractBuilder<'ctx> {
             debug_ir,
             debug_asm,
             host_functions,
+            tracing_options,
         } = self;
 
+        let tracer = Tracers::initialize(&ctx, tracing_options);
         let cursor = cursor::InstructionCursor::new(&ctx, code)?;
         let mut iter = cursor.iter();
 
@@ -278,6 +288,9 @@ impl<'ctx> JitContractBuilder<'ctx> {
             use EvmOp::*;
 
             ctx.builder.position_at_end(current.block().block);
+
+            // pre-opcode tracing
+            tracer.step(&ctx, current)?;
 
             match current.op() {
                 Stop => ops::build_stop_op(&ctx, current)?,

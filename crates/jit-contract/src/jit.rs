@@ -12,6 +12,7 @@ mod cursor;
 mod error;
 mod ffi;
 pub mod gas;
+mod tracing;
 mod types;
 
 mod ops;
@@ -22,5 +23,6 @@ pub use context::{
     BlockConfig, DBBox, ExecutionResult, Halt, JitEvmExecutionContext, Success, TransactionConfig,
 };
 pub use error::JitEvmEngineError;
+pub use tracing::TracingOptions;
 
 pub mod contract;
