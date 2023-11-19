@@ -1,20 +1,44 @@
-use super::Tracer;
+use super::{TraceData, Tracer};
+use crate::constants::EVM_STACK_ELEMENT_SIZE;
 use crate::jit::{
-    context::JitContractExecutionResult,
+    context::{JitContractExecutionResult, JitEvmPtrs},
     contract::{BuilderContext, JitEvmEngineSimpleBlock},
     cursor::CurrentInstruction,
     error::JitEvmEngineError,
 };
-use inkwell::{values::GlobalValue, AddressSpace};
+use inkwell::{
+    execution_engine::ExecutionEngine,
+    values::{FunctionValue, GlobalValue},
+    AddressSpace,
+};
 
 pub(crate) struct CycleBreakpoint<'ctx> {
     breakpoint: GlobalValue<'ctx>,
     cycles: GlobalValue<'ctx>,
+    cb_func: FunctionValue<'ctx>,
 }
 
 impl<'ctx> CycleBreakpoint<'ctx> {
-    pub fn initialize(ctx: &BuilderContext<'ctx>, cycles: u64) -> CycleBreakpoint<'ctx> {
+    pub fn initialize(
+        ctx: &BuilderContext<'ctx>,
+        execution_engine: &ExecutionEngine<'ctx>,
+        cycles: u64,
+    ) -> CycleBreakpoint<'ctx> {
         let addr = AddressSpace::default();
+
+        let cb_type = ctx.types.type_void.fn_type(
+            &[
+                ctx.types.type_ptrint.into(),
+                ctx.types.type_ptrint.into(),
+                ctx.types.type_ptrint.into(),
+                ctx.types.type_ptrint.into(),
+            ],
+            false,
+        );
+        let cb_func = ctx
+            .module
+            .add_function("callback_tracing_output", cb_type, None);
+        execution_engine.add_global_mapping(&cb_func, tracing_output as usize);
 
         // TODO: add to executecontext args so this doesn't have to re-JIT for different cycle
         // counts.
@@ -32,7 +56,11 @@ impl<'ctx> CycleBreakpoint<'ctx> {
         cycles.set_thread_local(true);
         cycles.set_initializer(&const_0);
 
-        CycleBreakpoint { breakpoint, cycles }
+        CycleBreakpoint {
+            breakpoint,
+            cycles,
+            cb_func,
+        }
     }
 }
 
@@ -79,11 +107,31 @@ impl<'ctx> Tracer<'ctx> for CycleBreakpoint<'ctx> {
 
         let cmp =
             ctx.builder
-                .build_int_compare(inkwell::IntPredicate::UGE, cycles, breakpoint, "")?;
+                .build_int_compare(inkwell::IntPredicate::UGT, cycles, breakpoint, "")?;
         ctx.builder
             .build_conditional_branch(cmp, end.block, next.block)?;
 
         ctx.builder.position_at_end(end.block);
+        let book = end.book();
+
+        let stack_size = ctx.builder.build_int_sub(book.sp, book.sp_min, "")?.into();
+        let mem_size = book.mem_size.into();
+
+        let opidx = current.idx();
+        let ip = current
+            .code()
+            .opidx2target
+            .get(&opidx)
+            .expect("Should exist.");
+        let ip = ctx
+            .types
+            .type_ptrint
+            .const_int(ip.as_limbs()[0], false)
+            .into();
+
+        let ec = book.execution_context.into();
+        ctx.builder
+            .build_call(self.cb_func, &[ec, stack_size, mem_size, ip], "")?;
         JitContractExecutionResult::build_exit_stop(ctx, &end)?;
 
         ctx.builder.position_at_end(next.block);
@@ -91,6 +139,18 @@ impl<'ctx> Tracer<'ctx> for CycleBreakpoint<'ctx> {
 
         Ok(())
     }
+}
+
+pub extern "C" fn tracing_output(exectx: usize, stack_size: usize, mem_size: usize, ip: usize) {
+    let rawptrs = JitEvmPtrs::from_raw(exectx);
+    let stack_elements = stack_size / EVM_STACK_ELEMENT_SIZE as usize;
+
+    let memory = rawptrs.mem_slice(0, mem_size).to_vec();
+    let stack = rawptrs.stack_slice(stack_elements).to_vec();
+
+    let data = TraceData::EVMState { stack, memory, ip };
+
+    rawptrs.push_trace_data(data);
 }
 
 #[cfg(test)]

@@ -278,7 +278,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             tracing_options,
         } = self;
 
-        let tracer = Tracers::initialize(&ctx, tracing_options);
+        let tracer = Tracers::initialize(&ctx, &execution_engine, tracing_options);
         let cursor = cursor::InstructionCursor::new(&ctx, code)?;
         let mut iter = cursor.iter();
 

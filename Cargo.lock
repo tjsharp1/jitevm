@@ -3008,6 +3008,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "jitty"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "hex",
+ "inkwell",
+ "jit-contract",
+ "reth",
+ "reth-db",
+ "reth-interfaces",
+ "reth-primitives",
+ "reth-provider",
+ "revm",
+ "revm-primitives",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6716,25 +6737,6 @@ name = "tower-service"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
-
-[[package]]
-name = "tracer"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "clap",
- "eyre",
- "hex",
- "inkwell",
- "jit-contract",
- "reth",
- "reth-db",
- "reth-interfaces",
- "reth-primitives",
- "reth-provider",
- "revm",
- "revm-primitives",
-]
 
 [[package]]
 name = "tracing"

@@ -23,6 +23,6 @@ pub use context::{
     BlockConfig, DBBox, ExecutionResult, Halt, JitEvmExecutionContext, Success, TransactionConfig,
 };
 pub use error::JitEvmEngineError;
-pub use tracing::TracingOptions;
+pub use tracing::{TraceData, TracingOptions};
 
 pub mod contract;

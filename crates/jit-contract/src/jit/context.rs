@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::jit::{contract::BuilderContext, error::JitEvmEngineError};
+use crate::jit::{contract::BuilderContext, error::JitEvmEngineError, tracing::TraceData};
 use alloy_primitives::{Address, B256, U256};
 use inkwell::{
     context::Context,
@@ -39,6 +39,7 @@ pub(in crate::jit) struct JitEvmPtrs {
     pub calldata: usize,
     pub calldatalen: usize,
     pub evm_state: usize,
+    pub trace_data: usize,
 }
 
 impl<'ctx> JitEvmPtrs {
@@ -55,6 +56,7 @@ impl<'ctx> JitEvmPtrs {
             ptr_type.into(), // calldata
             ptr_type.into(), // calldatalen
             ptr_type.into(), // evm_state
+            ptr_type.into(), // trace_data
         ];
         ctx.struct_type(&fields, false)
     }
@@ -182,6 +184,7 @@ impl JitEvmPtrs {
             calldata: ctx.calldata.as_ptr() as usize,
             calldatalen: ctx.calldata.len(),
             evm_state: &mut ctx.evm_state as *mut _ as usize,
+            trace_data: &mut ctx.trace_data as *mut _ as usize,
         }
     }
 
@@ -205,8 +208,17 @@ impl JitEvmPtrs {
         unsafe { std::slice::from_raw_parts((self.memory + ptr) as *const u8, size) }
     }
 
+    pub fn stack_slice(&self, size: usize) -> &[U256] {
+        unsafe { std::slice::from_raw_parts(self.stack as *const U256, size) }
+    }
+
     pub fn stack_mut(&self, sp: usize, offset: usize) -> &mut U256 {
         unsafe { &mut *((sp - offset * EVM_STACK_ELEMENT_SIZE as usize) as *mut _) }
+    }
+
+    pub fn push_trace_data(&self, data: TraceData) {
+        let trace_data: &mut Vec<TraceData> = unsafe { &mut *(self.trace_data as *mut _) };
+        trace_data.push(data);
     }
 }
 
@@ -256,6 +268,7 @@ impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
             transaction_context,
             calldata,
             evm_state,
+            trace_data: Vec::new(),
             _data: Default::default(),
         }
     }
@@ -269,6 +282,7 @@ pub struct JitEvmExecutionContext<SPEC: Spec> {
     transaction_context: TransactionContext,
     calldata: Bytes,
     evm_state: EVMState,
+    trace_data: Vec<TraceData>,
     _data: std::marker::PhantomData<SPEC>,
 }
 
@@ -322,6 +336,10 @@ impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
             transaction: None,
             calldata: None,
         }
+    }
+
+    pub fn trace_data(&self) -> Vec<TraceData> {
+        self.trace_data.clone()
     }
 
     pub fn final_state(self) -> State {

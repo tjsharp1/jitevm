@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "bins/tracer",
+    "bins/jitty",
     "crates/jit-contract"
 ]
 
