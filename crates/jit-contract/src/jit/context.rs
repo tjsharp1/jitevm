@@ -34,6 +34,7 @@ pub(in crate::jit) struct JitEvmPtrs {
     //           - possibly other code! => try not to change this!
     pub stack: usize,
     pub memory: usize,
+    pub memory_limit: usize,
     pub block_context: usize,
     pub transaction_context: usize,
     pub calldata: usize,
@@ -51,6 +52,7 @@ impl<'ctx> JitEvmPtrs {
         let fields = vec![
             ptr_type.into(), // stack
             ptr_type.into(), // memory
+            ptr_type.into(), // memory_limit
             ptr_type.into(), // block_context
             ptr_type.into(), // transaction_context
             ptr_type.into(), // calldata
@@ -76,7 +78,7 @@ impl<'ctx> JitEvmPtrs {
         let offset = ctx.builder.build_struct_gep(
             ctx.types.execution_context,
             ptr,
-            3,
+            4,
             "get_transaction_context",
         )?;
 
@@ -107,7 +109,7 @@ impl<'ctx> JitEvmPtrs {
         let offset = ctx.builder.build_struct_gep(
             ctx.types.execution_context,
             ptr,
-            2,
+            3,
             "get_block_context",
         )?;
 
@@ -135,7 +137,7 @@ impl<'ctx> JitEvmPtrs {
 
         let offset =
             ctx.builder
-                .build_struct_gep(ctx.types.execution_context, ptr, 4, "get_calldata")?;
+                .build_struct_gep(ctx.types.execution_context, ptr, 5, "get_calldata")?;
 
         Ok(ctx
             .builder
@@ -145,6 +147,31 @@ impl<'ctx> JitEvmPtrs {
                 "calldata_ptr",
             )?
             .into_pointer_value())
+    }
+
+    pub fn build_get_memory_limit(
+        ctx: &BuilderContext<'ctx>,
+        execution_context: IntValue<'ctx>,
+    ) -> Result<IntValue<'ctx>, JitEvmEngineError> {
+        let ptr = ctx.builder.build_int_to_ptr(
+            execution_context,
+            ctx.types
+                .execution_context
+                .ptr_type(AddressSpace::default()),
+            "",
+        )?;
+
+        let offset = ctx.builder.build_struct_gep(
+            ctx.types.execution_context,
+            ptr,
+            2,
+            "get_memory_limit",
+        )?;
+
+        Ok(ctx
+            .builder
+            .build_load(ctx.types.type_i64, offset, "memory_limit")?
+            .into_int_value())
     }
 
     pub fn build_get_calldatalen(
@@ -161,7 +188,7 @@ impl<'ctx> JitEvmPtrs {
 
         let offset =
             ctx.builder
-                .build_struct_gep(ctx.types.execution_context, ptr, 5, "get_calldatalen")?;
+                .build_struct_gep(ctx.types.execution_context, ptr, 6, "get_calldatalen")?;
 
         Ok(ctx
             .builder
@@ -179,6 +206,7 @@ impl JitEvmPtrs {
         JitEvmPtrs {
             stack: ctx.stack.as_mut_ptr() as usize,
             memory: ctx.memory.as_mut_ptr() as usize,
+            memory_limit: ctx.memory.len(),
             block_context: &mut ctx.block_context as *mut _ as usize,
             transaction_context: &mut ctx.transaction_context as *mut _ as usize,
             calldata: ctx.calldata.as_ptr() as usize,
@@ -228,6 +256,7 @@ pub struct JitEvmExecutionContextBuilder<SPEC: Spec> {
     block: Option<BlockConfig>,
     transaction: Option<TransactionConfig>,
     calldata: Option<Bytes>,
+    memory_size: Option<usize>,
 }
 
 impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
@@ -246,6 +275,11 @@ impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
         self
     }
 
+    pub fn memory_size(mut self, memory: usize) -> Self {
+        self.memory_size = Some(memory);
+        self
+    }
+
     pub fn build_with_db<DB: Database>(self, db: &DB) -> JitEvmExecutionContext<SPEC> {
         let mut evm_state = EVMState::with_db::<DB, SPEC>(db);
 
@@ -255,6 +289,8 @@ impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
         let cfg = self.transaction.unwrap_or_default();
         let transaction_context = TransactionContext::from_config(cfg);
 
+        let memory_size = self.memory_size.unwrap_or(EVM_MEMORY_BYTES);
+
         // preload caller and contract accounts
         evm_state.load_account(transaction_context.caller_address());
         evm_state.load_account(transaction_context.contract_address());
@@ -263,7 +299,7 @@ impl<SPEC: Spec> JitEvmExecutionContextBuilder<SPEC> {
 
         JitEvmExecutionContext {
             stack: vec![U256::ZERO; EVM_STACK_SIZE],
-            memory: vec![0u8; EVM_MEMORY_BYTES],
+            memory: vec![0u8; memory_size],
             block_context,
             transaction_context,
             calldata,
@@ -335,6 +371,7 @@ impl<SPEC: Spec> JitEvmExecutionContext<SPEC> {
             block: None,
             transaction: None,
             calldata: None,
+            memory_size: None,
         }
     }
 

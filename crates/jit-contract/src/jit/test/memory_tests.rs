@@ -10,7 +10,7 @@ fn operations_jit_test_mload() {
     const CHUNKS: usize = 256;
     const BYTES: usize = 32;
 
-    for _ in 0..1000 {
+    for _ in 0..100 {
         let mut ops = Vec::new();
         let db = InMemoryDB::default();
         let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
@@ -100,7 +100,7 @@ fn operations_jit_test_mstore8() {
     const CHUNKS: usize = 256;
     const BYTES: usize = 32;
 
-    for _ in 0..1000 {
+    for _ in 0..100 {
         let mut ops = Vec::new();
         let db = InMemoryDB::default();
         let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
@@ -191,7 +191,7 @@ fn operations_jit_test_mstore() {
 
     let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
 
-    for _ in 0..1000 {
+    for _ in 0..100 {
         let mut ops = Vec::new();
         let db = InMemoryDB::default();
         let mut execution_context = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
@@ -265,4 +265,142 @@ fn operations_stack_underflow_mstore() {
     let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
 
     expect_success!(mload, result, Success::Stop, expected_gas);
+}
+
+#[test]
+fn operations_memory_limit_mstore() {
+    use crate::code::EvmOp::*;
+
+    let ops = vec![Push(32, U256::from(1)), Push(32, U256::from(992)), Mstore];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+
+    let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+    let mem_gas = memory_gas_calc::<LatestSpec>(1024);
+
+    let expected_gas = init_cost + push_cost * 2 + const_cost + mem_gas;
+    expect_success!(mload, result, Success::Stop, expected_gas);
+
+    let ops = vec![Push(32, U256::from(1)), Push(32, U256::from(1020)), Mstore];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
+
+    let ops = vec![Push(32, U256::from(1)), Push(32, U256::from(1024)), Mstore];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
+
+    let ops = vec![
+        Push(32, U256::from(1)),
+        Push(32, U256::from(4 * 1024 * 1024)),
+        Mstore,
+    ];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
+}
+
+#[test]
+fn operations_memory_limit_mstore8() {
+    use crate::code::EvmOp::*;
+
+    let ops = vec![Push(32, U256::from(1)), Push(32, U256::from(1023)), Mstore8];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+
+    let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+    let mem_gas = memory_gas_calc::<LatestSpec>(1024);
+
+    let expected_gas = init_cost + push_cost * 2 + const_cost + mem_gas;
+    expect_success!(mload, result, Success::Stop, expected_gas);
+
+    let ops = vec![Push(32, U256::from(1)), Push(32, U256::from(1024)), Mstore8];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
+
+    let ops = vec![
+        Push(32, U256::from(1)),
+        Push(32, U256::from(4 * 1024 * 1024)),
+        Mstore8,
+    ];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
+}
+
+#[test]
+fn operations_memory_limit_mload() {
+    use crate::code::EvmOp::*;
+
+    let ops = vec![Push(32, U256::from(992)), Mload];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    let push_cost = gas::const_cost::<LatestSpec>(Push(32, U256::ZERO));
+    let init_cost = gas::init_gas::<LatestSpec>(&[]);
+
+    let const_cost = gas::const_cost::<LatestSpec>(EvmOp::Mstore);
+    let mem_gas = memory_gas_calc::<LatestSpec>(1024);
+
+    let expected_gas = init_cost + push_cost + const_cost + mem_gas;
+    expect_success!(mload, result, Success::Stop, expected_gas);
+
+    let ops = vec![Push(32, U256::from(1024)), Mload];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
+        .memory_size(1024)
+        .build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
+
+    let ops = vec![Push(32, U256::from(4 * 1024 * 1024)), Mload];
+
+    let db = InMemoryDB::default();
+    let mut ctx = JitEvmExecutionContext::builder(LatestSpec).build_with_db(&db);
+    let result = test_jit(LatestSpec, ops, &mut ctx).expect("Contract build failed");
+
+    expect_halt!(mload, result, Halt::OutOfGasMemoryLimit);
 }

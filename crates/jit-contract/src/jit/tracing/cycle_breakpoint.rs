@@ -193,7 +193,7 @@ mod tests {
         ];
 
         fn stack_check(cycles: u64, stack: Vec<U256>) {
-            let cycles = cycles - 3;
+            let cycles = cycles - 2;
             let (q, r) = (cycles / 4, cycles % 4);
 
             if r <= 1 {
