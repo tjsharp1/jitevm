@@ -12,6 +12,8 @@ pub struct Args {
 pub enum SubCommands {
     /// Run a transaction with the specified contract address
     Run(cmd::RunCmd),
+    /// Diff EVM vs JIT state by cycle breakpoint
+    CycleDiff(cmd::CycleDiffCmd),
     /// Get the post-deploy state of a contract.
     Deploy(cmd::DeployCmd),
 }
@@ -21,6 +23,7 @@ fn main() -> eyre::Result<()> {
 
     match args.command {
         SubCommands::Run(cmd) => cmd.run(),
+        SubCommands::CycleDiff(cmd) => cmd.run(),
         SubCommands::Deploy(cmd) => cmd.run(),
     }
 }

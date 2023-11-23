@@ -1,14 +1,10 @@
 mod common;
 use common::*;
 
-use jit_contract::jit::{
-    ExecutionResult, Halt, Success,
-};
-use revm::{
-    primitives::{
-        Bytes, Eval, ExecutionResult as REVMExecutionResult,
-        Halt as REVMHalt, OutOfGasError, Output, ResultAndState,
-    },
+use jit_contract::jit::{ExecutionResult, Halt, Success};
+use revm::primitives::{
+    Bytes, Eval, ExecutionResult as REVMExecutionResult, Halt as REVMHalt, OutOfGasError, Output,
+    ResultAndState,
 };
 
 #[test]

@@ -700,7 +700,7 @@ pub fn const_cost<SPEC: Spec>(op: EvmOp) -> u64 {
         EvmOp::Slt => 3,
         EvmOp::Sgt => 3,
         EvmOp::Not => 3,
-        EvmOp::Signextend => 3,
+        EvmOp::Signextend => 5,
         EvmOp::Addmod => 8,
         EvmOp::Mulmod => 8,
         EvmOp::Push(len, _) => {

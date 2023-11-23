@@ -1,13 +1,17 @@
 use inkwell::context::Context;
 use jit_contract::{
     code::{EvmCode, EvmOpParserMode},
-    jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, TransactionConfig},
+    jit::{
+        contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, TransactionConfig,
+    },
 };
-use revm::{EVM, InMemoryDB};
-use revm_primitives::{AccountInfo, Address, address, B256, Bytecode, Bytes, Env, HashMap, LatestSpec, ResultAndState, TransactTo, U256};
-use serde::{Serialize, Deserialize};
+use revm::{InMemoryDB, EVM};
+use revm_primitives::{
+    address, AccountInfo, Address, Bytecode, Bytes, Env, HashMap, LatestSpec, ResultAndState,
+    TransactTo, B256, U256,
+};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeployImage {
@@ -133,7 +137,6 @@ pub fn run_evm_with_code(deploy: DeployImage, calldata: Bytes) -> ResultAndState
 
 macro_rules! assert_evm_jit_equivalence {
     ($image:ident, $calldata:ident) => {
-
         let ResultAndState { result, .. } = run_evm_with_code($image.clone(), $calldata.clone());
 
         let jit_result = run_jit_with_code($image, $calldata);

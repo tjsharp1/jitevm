@@ -158,9 +158,7 @@ mod tests {
     use super::*;
     use crate::{
         code::EvmOp,
-        jit::{
-            contract::JitContractBuilder, gas, ExecutionResult, JitEvmExecutionContext, Success,
-        },
+        jit::{contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, Success},
     };
     use alloy_primitives::U256;
     use revm::db::InMemoryDB;

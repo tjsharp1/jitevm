@@ -15,6 +15,7 @@ use revm::db::CacheDB;
 use revm_primitives::LatestSpec;
 use std::{path::PathBuf, sync::Arc};
 
+
 /// Simulate a transaction, based off of state from the specified chain.
 #[derive(clap::Args, Debug)]
 #[command(author, version, about, long_about = None)]

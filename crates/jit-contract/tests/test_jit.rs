@@ -2,16 +2,11 @@ mod common;
 
 use common::*;
 
-use jit_contract::jit::{
-    ExecutionResult, Halt, Success,
+use jit_contract::jit::{ExecutionResult, Halt, Success};
+use revm::primitives::{
+    Bytes, Eval, ExecutionResult as REVMExecutionResult, Halt as REVMHalt, OutOfGasError, Output,
+    ResultAndState,
 };
-use revm::{
-    primitives::{
-        Bytes, Eval, ExecutionResult as REVMExecutionResult,
-        Halt as REVMHalt, OutOfGasError, Output, ResultAndState,
-    },
-};
-
 
 #[test]
 fn test_evm_and_jit_fibonacci() {
