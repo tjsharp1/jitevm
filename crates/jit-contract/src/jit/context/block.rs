@@ -1,14 +1,9 @@
 use crate::jit::{
-    context::JitEvmPtrs,
-    contract::BuilderContext,
-    cursor::CurrentInstruction,
-    gas::{build_gas_check, const_cost},
-    ops::{build_stack_check, build_stack_push},
+    context::JitEvmPtrs, contract::BuilderContext, cursor::Current, ops::build_stack_push,
     JitEvmEngineError,
 };
 use alloy_primitives::{Address, B256, U256};
 use inkwell::{context::Context, targets::TargetData, types::StructType, AddressSpace};
-use revm_primitives::Spec;
 
 #[derive(Clone, Debug)]
 pub struct BlockConfig {
@@ -87,13 +82,10 @@ impl<'ctx> BlockContext {
         ctx.struct_type(&fields, false)
     }
 
-    pub(crate) fn build_get_number<'a, SPEC: Spec>(
+    pub(crate) fn build_get_number<'a>(
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
         let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
@@ -112,21 +104,13 @@ impl<'ctx> BlockContext {
             .into_int_value();
         build_stack_push!(ctx, current, value);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
-    pub(crate) fn build_get_coinbase<'a, SPEC: Spec>(
+    pub(crate) fn build_get_coinbase<'a>(
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
         let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
@@ -145,21 +129,13 @@ impl<'ctx> BlockContext {
             .into_int_value();
         build_stack_push!(ctx, current, value);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
-    pub(crate) fn build_get_timestamp<'a, SPEC: Spec>(
+    pub(crate) fn build_get_timestamp<'a>(
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
         let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
@@ -179,55 +155,13 @@ impl<'ctx> BlockContext {
 
         build_stack_push!(ctx, current, value);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
-    pub(crate) fn build_get_difficulty<'a, SPEC: Spec>(
+    pub(crate) fn build_get_randao<'a>(
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
-        let book = current.book_ref();
-        let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
-        let ptr = ctx.builder.build_pointer_cast(
-            ptr,
-            ctx.types.block_context.ptr_type(AddressSpace::default()),
-            "",
-        )?;
-
-        let ptr =
-            ctx.builder
-                .build_struct_gep(ctx.types.block_context, ptr, 3, "get_difficulty")?;
-
-        let value = ctx
-            .builder
-            .build_load(ctx.types.type_stackel, ptr, "load_difficulty")?
-            .into_int_value();
-
-        build_stack_push!(ctx, current, value);
-
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
-        Ok(())
-    }
-
-    pub(crate) fn build_get_randao<'a, SPEC: Spec>(
-        ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
-    ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
         let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
@@ -246,21 +180,13 @@ impl<'ctx> BlockContext {
             .into_int_value();
         build_stack_push!(ctx, current, value);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
-    pub(crate) fn build_get_basefee<'a, SPEC: Spec>(
+    pub(crate) fn build_get_basefee<'a>(
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
         let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
@@ -279,21 +205,13 @@ impl<'ctx> BlockContext {
             .into_int_value();
         build_stack_push!(ctx, current, value);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
-    pub(crate) fn build_get_gas_limit<'a, SPEC: Spec>(
+    pub(crate) fn build_get_gas_limit<'a>(
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_gas_check!(ctx, current);
-        build_stack_check!(ctx, current, 0, 1);
-
         let book = current.book_ref();
         let ptr = JitEvmPtrs::build_get_block_context_ptr(ctx, book.execution_context)?;
         let ptr = ctx.builder.build_pointer_cast(
@@ -312,11 +230,6 @@ impl<'ctx> BlockContext {
             .into_int_value();
         build_stack_push!(ctx, current, value);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 }

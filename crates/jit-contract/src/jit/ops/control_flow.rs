@@ -1,171 +1,92 @@
-use crate::jit::ops::stack::{build_stack_check, build_stack_pop};
+use crate::jit::ops::stack::build_stack_pop;
 use crate::jit::{
-    contract::BuilderContext,
-    cursor::CurrentInstruction,
-    gas::{build_gas_check, const_cost},
+    context::JitContractResultCode,
+    contract::{BuilderContext, JitEvmEngineSimpleBlock},
+    cursor::Current,
     JitContractExecutionResult, JitEvmEngineError,
 };
 use alloy_primitives::U256;
-use inkwell::AddressSpace;
-use revm_primitives::Spec;
+use inkwell::{AddressSpace, IntPredicate};
 
 pub(crate) fn build_stop_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    let block = current.block();
+    let book = current.book_ref();
 
-    JitContractExecutionResult::build_exit_stop(ctx, block)?;
+    JitContractExecutionResult::build_exit_stop(ctx, book)?;
 
     Ok(())
 }
 
-pub(crate) fn build_jumpdest_op<'ctx, SPEC: Spec>(
-    ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+pub(crate) fn build_jumpdest_op<'ctx>(
+    _: &BuilderContext<'ctx>,
+    _: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
-pub(crate) fn build_jump_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_jump_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 1, 0);
-
     let target = build_stack_pop!(ctx, current);
 
     let book = current.book_ref();
-    let code = current.code();
     let this = current.block();
+    let jumpdests = current.jumpdests();
+    let target2blockidx = current.target2blockidx();
 
-    if code.jumpdests.is_empty() {
+    if jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
     } else {
-        let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
-        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-            let jmp_target = code.opidx2target[jmp_i];
-            jump_table.push(JitEvmEngineSimpleBlock::new(
-                ctx,
-                if j == 0 {
-                    this.block
-                } else {
-                    jump_table[j - 1].block
-                },
-                &format!(
-                    "instruction #{}: {:?} / to Jumpdest #{} at op #{} to byte #{}",
-                    current.idx(),
-                    current.op(),
-                    j,
-                    jmp_i,
-                    jmp_target
-                ),
-                &format!("_{}_{}", current.idx(), j),
-            )?);
-        }
+        let blocks = current.blocks();
+        let label = format!("invalid-jump-{}", current.idx());
+        let idx = format!("jump-{}", current.idx());
+
+        let error_block = JitEvmEngineSimpleBlock::new(ctx, this.block, &label, &idx)?;
+        let code = u32::from(JitContractResultCode::InvalidJump);
+        let code = ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt(ctx, &error_block.book(), code)?;
+        error_block.add_incoming(book, this);
 
         ctx.builder.position_at_end(this.block);
-        ctx.builder
-            .build_unconditional_branch(jump_table[0].block)?;
-        jump_table[0].add_incoming(book, this);
 
-        let instructions = current.instructions();
-        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-            let jmp_target = code.opidx2target[jmp_i];
-            let jmp_target: u64 = jmp_target.into_limbs()[0]; // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
-            ctx.builder.position_at_end(jump_table[j].block);
-            let cmp = ctx.builder.build_int_compare(
-                IntPredicate::EQ,
-                ctx.types.type_stackel.const_int(jmp_target, false),
-                target,
-                "",
-            )?;
-            if j + 1 == code.jumpdests.len() {
-                let error_label = format!("instruction #{}: error", current.idx());
-                let error_idx = format!("i#{}_{}", current.idx(), j);
-                let error_block = JitEvmEngineSimpleBlock::new(
-                    ctx,
-                    jump_table[j].block,
-                    &error_label,
-                    &error_idx,
-                )?;
-
-                ctx.builder.position_at_end(jump_table[j].block);
-                ctx.builder.build_conditional_branch(
-                    cmp,
-                    instructions[*jmp_i].block,
-                    error_block.block,
-                )?;
-                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
-                error_block.add_incoming(book, &jump_table[j]);
-                ctx.builder.position_at_end(error_block.block);
-                JitContractExecutionResult::build_exit_halt(
-                    ctx,
-                    &error_block,
-                    JitContractResultCode::InvalidJump,
-                )?;
-            } else {
-                ctx.builder.build_conditional_branch(
-                    cmp,
-                    instructions[*jmp_i].block,
-                    jump_table[j + 1].block,
-                )?;
-                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
-                jump_table[j + 1].add_incoming(book, &jump_table[j]);
-            }
+        let mut destinations = Vec::new();
+        for (key, value) in target2blockidx {
+            let t = ctx.types.type_i64.const_int(*key as u64, false);
+            blocks[*value].add_incoming(book, this);
+            destinations.push((t, blocks[*value].block));
         }
+
+        let target = ctx.builder.build_int_cast(target, ctx.types.type_i64, "")?;
+
+        ctx.builder
+            .build_switch(target, error_block.block, &destinations)?;
     }
 
     Ok(())
 }
 
-pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_jumpi_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 2, 0);
-
     let target = build_stack_pop!(ctx, current);
     let val = build_stack_pop!(ctx, current);
 
     let book = current.book_ref();
-    let code = current.code();
     let this = current.block();
-    let next = current.next();
+    let next = current.next_block();
+    let jumpdests = current.jumpdests();
+    let target2blockidx = current.target2blockidx();
 
-    if code.jumpdests.is_empty() {
+    if jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
     } else {
-        let mut jump_table: Vec<JitEvmEngineSimpleBlock<'_>> = Vec::new();
-        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-            let jmp_target = code.opidx2target[jmp_i];
-            jump_table.push(JitEvmEngineSimpleBlock::new(
-                ctx,
-                if j == 0 {
-                    this.block
-                } else {
-                    jump_table[j - 1].block
-                },
-                &format!(
-                    "instruction #{}: {:?} / to Jumpdest #{} at op #{} to byte #{}",
-                    current.idx(),
-                    current.op(),
-                    j,
-                    jmp_i,
-                    jmp_target
-                ),
-                &format!("_{}_{}", current.idx(), j),
-            )?);
-        }
+        let label = format!("jumpi-block-{}", current.idx());
+        let idx = format!("jumpi-{}", current.idx());
+        let jump_table = JitEvmEngineSimpleBlock::new(ctx, this.block, &label, &idx)?;
 
         ctx.builder.position_at_end(this.block);
         let cmp = ctx.builder.build_int_compare(
@@ -175,108 +96,77 @@ pub(crate) fn build_jumpi_op<'ctx, SPEC: Spec>(
             "",
         )?;
         ctx.builder
-            .build_conditional_branch(cmp, next.block, jump_table[0].block)?;
+            .build_conditional_branch(cmp, next.block, jump_table.block)?;
         next.add_incoming(book, this);
-        jump_table[0].add_incoming(book, this);
+        jump_table.add_incoming(book, this);
 
-        let instructions = current.instructions();
-        for (j, jmp_i) in code.jumpdests.iter().enumerate() {
-            let jmp_target = code.opidx2target[jmp_i];
-            let jmp_target: u64 = jmp_target.into_limbs()[0]; // REMARK: assumes that code cannot exceed 2^64 instructions, probably ok ;)
-            ctx.builder.position_at_end(jump_table[j].block);
-            let cmp = ctx.builder.build_int_compare(
-                IntPredicate::EQ,
-                ctx.types.type_stackel.const_int(jmp_target, false),
-                target,
-                "",
-            )?;
-            if j + 1 == code.jumpdests.len() {
-                let error_label = format!("instruction #{}: error", current.idx());
-                let error_idx = format!("i#{}_{}", current.idx(), j);
-                let error_block = JitEvmEngineSimpleBlock::new(
-                    ctx,
-                    jump_table[j].block,
-                    &error_label,
-                    &error_idx,
-                )?;
+        let book = jump_table.book();
+        let label = format!("invalid-jumpi-block-{}", current.idx());
+        let idx = format!("jumpi-{}", current.idx());
+        let error_block = JitEvmEngineSimpleBlock::new(ctx, jump_table.block, &label, &idx)?;
+        let code = u32::from(JitContractResultCode::InvalidJump);
+        let code = ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt(ctx, &error_block.book(), code)?;
+        error_block.add_incoming(&book, &jump_table);
 
-                ctx.builder.position_at_end(jump_table[j].block);
-                ctx.builder.build_conditional_branch(
-                    cmp,
-                    instructions[*jmp_i].block,
-                    error_block.block,
-                )?;
+        ctx.builder.position_at_end(jump_table.block);
 
-                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
-                error_block.add_incoming(book, &jump_table[j]);
-                ctx.builder.position_at_end(error_block.block);
-                JitContractExecutionResult::build_exit_halt(
-                    ctx,
-                    &error_block,
-                    JitContractResultCode::InvalidJump,
-                )?;
-            } else {
-                ctx.builder.build_conditional_branch(
-                    cmp,
-                    instructions[*jmp_i].block,
-                    jump_table[j + 1].block,
-                )?;
-                instructions[*jmp_i].add_incoming(book, &jump_table[j]);
-                jump_table[j + 1].add_incoming(book, &jump_table[j]);
-            }
+        let blocks = current.blocks();
+        let mut destinations = Vec::new();
+        for (key, value) in target2blockidx {
+            let t = ctx.types.type_i64.const_int(*key as u64, false);
+            blocks[*value].add_incoming(&book, &jump_table);
+            destinations.push((t, blocks[*value].block));
         }
+
+        let target = ctx.builder.build_int_cast(target, ctx.types.type_i64, "")?;
+        ctx.builder
+            .build_switch(target, error_block.block, &destinations)?;
     }
 
     Ok(())
 }
 
-pub(crate) fn build_augmented_jump_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_augmented_jump_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
     let book = current.book_ref();
-    let code = current.code();
     let this = current.block();
-    let instructions = current.instructions();
+    let target2blockidx = current.target2blockidx();
+    let jumpdests = current.jumpdests();
+    let blocks = current.blocks();
 
-    if code.jumpdests.is_empty() {
+    if jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
     } else {
-        // TODO: need to insert a run-time check if the target is a valid jump-dest!!
-        // retrieve the corresponding jump target (panic if not a valid jump target) ...
-        let jmp_i = code.target2opidx[&val];
-        // ... and jump to there!
+        let jmp_i = target2blockidx[&(val.as_limbs()[0] as usize)];
         ctx.builder
-            .build_unconditional_branch(instructions[jmp_i].block)?;
-        instructions[jmp_i].add_incoming(book, this);
+            .build_unconditional_branch(blocks[jmp_i].block)?;
+        blocks[jmp_i].add_incoming(book, this);
     }
     Ok(())
 }
 
-pub(crate) fn build_augmented_jumpi_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_augmented_jumpi_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 1, 0);
-
     let condition = build_stack_pop!(ctx, current);
 
     let book = current.book_ref();
-    let code = current.code();
     let this = current.block();
-    let next = current.next();
-    let instructions = current.instructions();
+    let next = current.next_block();
+    let jumpdests = current.jumpdests();
+    let target2blockidx = current.target2blockidx();
+    let blocks = current.blocks();
 
-    if code.jumpdests.is_empty() {
+    if jumpdests.is_empty() {
         return Err(JitEvmEngineError::NoValidJumpDestinations(current.idx()));
     } else {
-        // TODO: need to insert a run-time check if the target is a valid jump-dest!!
-        // retrieve the corresponding jump target (panic if not a valid jump target) ...
-        let jmp_i = code.target2opidx[&val];
+        let jmp_i = target2blockidx[&(val.as_limbs()[0] as usize)];
         // ... and jump to there (conditionally)!
         let cmp = ctx.builder.build_int_compare(
             IntPredicate::EQ,
@@ -285,9 +175,9 @@ pub(crate) fn build_augmented_jumpi_op<'ctx, SPEC: Spec>(
             "",
         )?;
         ctx.builder
-            .build_conditional_branch(cmp, next.block, instructions[jmp_i].block)?;
+            .build_conditional_branch(cmp, next.block, blocks[jmp_i].block)?;
         next.add_incoming(book, this);
-        instructions[jmp_i].add_incoming(book, this);
+        blocks[jmp_i].add_incoming(book, this);
     }
 
     Ok(())

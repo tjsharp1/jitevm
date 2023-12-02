@@ -1,182 +1,31 @@
 use crate::jit::{
-    contract::BuilderContext,
-    cursor::CurrentInstruction,
-    gas::{build_gas_check, const_cost},
-    EvmOp, JitEvmEngineError,
+    contract::BuilderContext, cursor::Current, EvmOp, JitEvmEngineError, EVM_JIT_STACK_ALIGN,
+    EVM_STACK_ELEMENT_SIZE,
 };
 use alloy_primitives::U256;
 use inkwell::AddressSpace;
-use revm_primitives::Spec;
 
-pub(crate) fn build_push_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_push_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
     val: U256,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 0, 1);
-
     let val = ctx
         .types
         .type_stackel
         .const_int_arbitrary_precision(&val.into_limbs());
     build_stack_push!(ctx, current, val);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
-pub(crate) fn build_pop_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_pop_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 1, 0);
-
     let _ = build_stack_pop!(ctx, current);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
-}
-
-macro_rules! build_stack_check {
-    ($ctx:expr, $current:ident, $min_stack:literal, $growth:literal) => {{
-        let min = $min_stack;
-        build_stack_check!($ctx, $current, min, $growth);
-    }};
-    ($ctx:expr, $current:ident, $min_stack:ident, $growth:literal) => {{
-        use crate::jit::{
-            context::{JitContractExecutionResult, JitContractResultCode},
-            contract::JitEvmEngineSimpleBlock,
-            EVM_STACK_ELEMENT_SIZE,
-        };
-        use inkwell::{intrinsics::Intrinsic, IntPredicate};
-
-        let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
-        let expect_fn = expect
-            .get_declaration(
-                &$ctx.module,
-                &[$ctx.types.type_bool.into(), $ctx.types.type_bool.into()],
-            )
-            .expect("Expect intrinsic declaration not found!");
-        let const_true = $ctx.types.type_bool.const_int(1, false);
-
-        if $min_stack > 0 {
-            let book = $current.book_ref();
-            let min_stack = $min_stack * EVM_STACK_ELEMENT_SIZE;
-            let const_min_stack = $ctx.types.type_i64.const_int(min_stack, false);
-            let min_sp = $ctx
-                .builder
-                .build_int_add(book.sp_min, const_min_stack, "")?;
-            let cmp = $ctx
-                .builder
-                .build_int_compare(IntPredicate::UGE, book.sp, min_sp, "")?;
-
-            let instruction_label = format!("i{}_no_underfl", $current.idx());
-            let idx = format!("_{}", $current.idx());
-            let next_block = JitEvmEngineSimpleBlock::new(
-                $ctx,
-                $current.block().block,
-                &instruction_label,
-                &idx,
-            )?;
-
-            let instruction_label = format!("i{}_error", $current.idx());
-            let idx = format!("_{}", $current.idx());
-            let error_block = JitEvmEngineSimpleBlock::new(
-                $ctx,
-                $current.block().block,
-                &instruction_label,
-                &idx,
-            )?;
-
-            next_block.add_incoming(&book, $current.block());
-            error_block.add_incoming(&book, $current.block());
-
-            $ctx.builder.position_at_end(error_block.block);
-            JitContractExecutionResult::build_exit_halt(
-                $ctx,
-                &error_block,
-                JitContractResultCode::StackUnderflow,
-            )?;
-
-            $ctx.builder.position_at_end($current.block().block);
-            let cmp = $ctx
-                .builder
-                .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
-                .try_as_basic_value()
-                .left()
-                .ok_or(JitEvmEngineError::NoInstructionValue)?
-                .into_int_value();
-            $ctx.builder
-                .build_conditional_branch(cmp, next_block.block, error_block.block)?;
-            $ctx.builder.position_at_end(next_block.block);
-
-            $current.update_current_block(next_block);
-        }
-
-        if $growth > 0 {
-            let book = $current.book_ref();
-            let need_stack = $growth * EVM_STACK_ELEMENT_SIZE;
-            let const_need_stack = $ctx.types.type_i64.const_int(need_stack, false);
-            let max_sp = $ctx
-                .builder
-                .build_int_sub(book.sp_max, const_need_stack, "")?;
-            let cmp = $ctx
-                .builder
-                .build_int_compare(IntPredicate::ULE, book.sp, max_sp, "")?;
-
-            let instruction_label = format!("i{}_no_ovf", $current.idx());
-            let idx = format!("_{}", $current.idx());
-            let next_block = JitEvmEngineSimpleBlock::new(
-                $ctx,
-                $current.block().block,
-                &instruction_label,
-                &idx,
-            )?;
-
-            let instruction_label = format!("i{}_error", $current.idx());
-            let idx = format!("_{}", $current.idx());
-            let error_block = JitEvmEngineSimpleBlock::new(
-                $ctx,
-                $current.block().block,
-                &instruction_label,
-                &idx,
-            )?;
-
-            next_block.add_incoming(&book, $current.block());
-            error_block.add_incoming(&book, $current.block());
-
-            $ctx.builder.position_at_end(error_block.block);
-            JitContractExecutionResult::build_exit_halt(
-                $ctx,
-                &error_block,
-                JitContractResultCode::StackOverflow,
-            )?;
-
-            $ctx.builder.position_at_end($current.block().block);
-            let cmp = $ctx
-                .builder
-                .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
-                .try_as_basic_value()
-                .left()
-                .ok_or(JitEvmEngineError::NoInstructionValue)?
-                .into_int_value();
-            $ctx.builder
-                .build_conditional_branch(cmp, next_block.block, error_block.block)?;
-            $ctx.builder.position_at_end(next_block.block);
-
-            $current.update_current_block(next_block);
-        }
-    }};
 }
 
 macro_rules! build_stack_push {
@@ -345,9 +194,9 @@ macro_rules! build_stack_read {
     }};
 }
 
-pub(crate) fn build_stack_swap_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_stack_swap_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
     let swap1 = EvmOp::Swap1.opcode();
     let swap16 = EvmOp::Swap16.opcode();
@@ -356,29 +205,19 @@ pub(crate) fn build_stack_swap_op<'ctx, SPEC: Spec>(
     assert!(swap1 <= opcode && opcode <= swap16);
 
     let idx = (opcode - swap1) as u64 + 2;
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, idx, 0);
 
     let a = build_stack_read!(ctx, current, 1);
     let b = build_stack_read!(ctx, current, idx);
     build_stack_write!(ctx, current, 1, b);
     build_stack_write!(ctx, current, idx, a);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
-
     Ok(())
 }
 
-pub(crate) fn build_dup_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_dup_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    use crate::jit::{EVM_JIT_STACK_ALIGN, EVM_STACK_ELEMENT_SIZE};
-
     let dup1 = EvmOp::Dup1.opcode();
     let dup16 = EvmOp::Dup16.opcode();
     let opcode = current.op().opcode();
@@ -386,8 +225,6 @@ pub(crate) fn build_dup_op<'ctx, SPEC: Spec>(
     assert!(dup1 <= opcode && opcode <= dup16);
 
     let idx = (opcode - dup1) as u64 + 1;
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, idx, 1);
 
     let book = current.book_ref();
     let len_stackel = ctx
@@ -420,14 +257,8 @@ pub(crate) fn build_dup_op<'ctx, SPEC: Spec>(
 
     current.book_ref_mut().update_sp(sp);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
-pub(crate) use build_stack_check;
 pub(crate) use build_stack_pop;
 pub(crate) use build_stack_push;

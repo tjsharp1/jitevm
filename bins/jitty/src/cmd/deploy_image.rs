@@ -1,58 +1,42 @@
-use eyre::eyre;
+use crate::util::parse_bytes;
 
-use alloy_primitives::hex::FromHex;
-use reth_primitives::{ChainSpec, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA};
-use revm::inspectors::CustomPrintTracer;
-use revm::{InMemoryDB, EVM};
-use revm_primitives::{
-    Account, AccountInfo, Address, Bytecode, Bytes, CreateScheme, Eval, ExecutionResult, HashMap,
-    Output, ResultAndState, TransactTo, B256, U256,
+use eyre::eyre;
+use revm::{
+    db::InMemoryDB,
+    inspectors::CustomPrintTracer,
+    primitives::{
+        Account, AccountInfo, Address, Bytes, CreateScheme, Eval, ExecutionResult, HashMap, Output,
+        ResultAndState, TransactTo, B256, U256,
+    },
+    EVM,
 };
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
-pub fn chainspec_parser(specname: &str) -> eyre::Result<Arc<ChainSpec>> {
-    Ok(match specname {
-        "mainnet" => MAINNET.clone(),
-        "goerli" => GOERLI.clone(),
-        "sepolia" => SEPOLIA.clone(),
-        "holesky" => HOLESKY.clone(),
-        "dev" => DEV.clone(),
-        spec => return Err(eyre!("Unknown specname: {spec}")),
-    })
+/// Deploy contract & output post-deploy state.
+#[derive(clap::Args, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct DeployCmd {
+    /// Bytecode to deploy
+    #[arg(long)]
+    initcode: PathBuf,
+    /// Constructor args
+    #[arg(long, value_parser = parse_bytes)]
+    args: Bytes,
+    /// Run deploy with inspector
+    #[arg(long, default_value = "false")]
+    inspect: bool,
 }
 
-pub fn parse_bytes(bytes: &str) -> eyre::Result<Bytes> {
-    Ok(Bytes::from_hex(bytes)?)
+impl DeployCmd {
+    pub fn run(self) -> eyre::Result<()> {
+        let image = DeployImage::from_file(&self.initcode, &self.args, self.inspect)?;
+        println!("{}", serde_json::to_string(&image)?);
+        Ok(())
+    }
 }
 
-pub fn load_evm_code(path: PathBuf) -> eyre::Result<Bytes> {
-    let code = std::fs::read_to_string(path)?;
-    let bytes = hex::decode(code)?;
-
-    Ok(Bytes::copy_from_slice(&bytes))
-}
-
-pub fn init_db_from_image(image: &DeployImage) -> eyre::Result<InMemoryDB> {
-    let mut database = InMemoryDB::default();
-
-    let bytecode = Bytecode::new_raw(image.code.clone()).to_checked();
-
-    let one_eth = U256::from(1) * U256::from(10).pow(U256::from(18));
-    let mut info = AccountInfo {
-        balance: U256::from(10) * one_eth,
-        nonce: 0,
-        code_hash: bytecode.hash_slow(),
-        code: Some(bytecode),
-    };
-    database.insert_contract(&mut info);
-    database.insert_account_info(image.address, info);
-    database.replace_account_storage(image.address, image.storage.clone())?;
-
-    Ok(database)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DeployImage {
     pub address: Address,
     pub code_hash: B256,

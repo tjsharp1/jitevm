@@ -53,7 +53,7 @@ impl<'ctx> JitTypes<'ctx> {
         assert_eq!(type_retval.get_bit_width(), 64);
         assert_eq!(u64::BITS, 64);
 
-        let type_i32 = context.i64_type();
+        let type_i32 = context.i32_type();
         let type_i64 = context.i64_type();
 
         // types for vectorized byte swapping

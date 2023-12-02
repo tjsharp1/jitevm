@@ -19,6 +19,10 @@ pub enum JitEvmEngineError {
     NoValidJumpDestinations(usize),
     #[error("Reth database error {0}!")]
     RethDBError(#[from] reth_interfaces::RethError),
+    #[error("EVM opcode error {0}!")]
+    EVMCodeError(#[from] crate::code::EvmCodeError),
+    #[error("UTF8 error {0}!")]
+    Utf8Error(#[from] core::str::Utf8Error),
 }
 
 impl From<String> for JitEvmEngineError {

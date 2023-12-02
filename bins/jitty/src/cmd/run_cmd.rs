@@ -3,6 +3,7 @@ use crate::util::{chainspec_parser, load_evm_code};
 use alloy_primitives::Address;
 use inkwell::context::Context;
 use jit_contract::{
+    code::EvmOpParserMode,
     db::StateProviderDatabase,
     jit::{contract::JitContractBuilder, JitEvmExecutionContext, TransactionConfig},
 };
@@ -14,7 +15,6 @@ use reth_provider::ProviderFactory;
 use revm::db::CacheDB;
 use revm_primitives::LatestSpec;
 use std::{path::PathBuf, sync::Arc};
-
 
 /// Simulate a transaction, based off of state from the specified chain.
 #[derive(clap::Args, Debug)]
@@ -66,7 +66,7 @@ impl RunCmd {
             .expect("Could not build jit contract")
             .debug_ir("jit_test.ll")
             .debug_asm("jit_test.asm")
-            .build(LatestSpec, evm_code.augment().index())
+            .build(LatestSpec, &evm_code, EvmOpParserMode::Strict)
             .unwrap();
 
         match contract.transact(&mut ctx) {

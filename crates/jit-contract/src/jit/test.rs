@@ -8,7 +8,7 @@ use crate::{
 use alloy_primitives::{Address, U256};
 use rand::{Rng, RngCore};
 use revm::db::InMemoryDB;
-use revm_primitives::{LatestSpec, Spec};
+use revm_primitives::{Bytes, LatestSpec, Spec};
 use sha3::{Digest, Keccak256};
 use std::{
     collections::{HashMap, HashSet},
@@ -32,15 +32,18 @@ fn test_jit<SPEC: Spec>(
     ops: Vec<EvmOp>,
     ctx: &mut JitEvmExecutionContext<SPEC>,
 ) -> Result<ExecutionResult, JitEvmEngineError> {
-    use crate::code::EvmCode;
+    use crate::code::{EvmCode, EvmOpParserMode};
     use inkwell::context::Context;
+
+    let opcode_bytes = EvmCode { ops }.to_bytes();
+    let code = Bytes::copy_from_slice(&opcode_bytes);
 
     let context = Context::create();
     let contract = JitContractBuilder::with_context("jit-instructions", &context)
         .expect("Could not build jit contract")
         .debug_ir("jit_test.ll")
         .debug_asm("jit_test.asm")
-        .build(spec, EvmCode { ops: ops.clone() }.augment().index())?;
+        .build(spec, &code, EvmOpParserMode::Strict)?;
     Ok(contract.transact(ctx).expect("Contract call failed"))
 }
 

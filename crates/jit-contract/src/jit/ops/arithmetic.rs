@@ -1,20 +1,17 @@
-use crate::jit::ops::{build_stack_check, build_stack_pop, build_stack_push};
+use crate::jit::ops::{build_stack_pop, build_stack_push};
 use crate::jit::{
     contract::{BuilderContext, JitEvmEngineSimpleBlock},
-    cursor::CurrentInstruction,
-    gas::{build_gas_check, build_gas_check_exp, const_cost, exp_cost},
+    cursor::Current,
+    gas::{build_gas_check_exp, exp_cost},
     EvmOp, JitEvmEngineError,
 };
 use inkwell::{AddressSpace, IntPredicate};
 use revm_primitives::Spec;
 
-pub(crate) fn iszero_op<'ctx, SPEC: Spec>(
+pub(crate) fn iszero_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 1, 0);
-
     let const_0 = ctx.types.type_stackel.const_int(0, false);
     let const_1 = ctx.types.type_stackel.const_int(1, false);
 
@@ -30,21 +27,13 @@ pub(crate) fn iszero_op<'ctx, SPEC: Spec>(
 
     build_stack_push!(ctx, current, result);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
-pub(crate) fn build_byte_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_byte_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 2, 0);
-
     let i = build_stack_pop!(ctx, current);
     let x = build_stack_pop!(ctx, current);
 
@@ -68,21 +57,14 @@ pub(crate) fn build_byte_op<'ctx, SPEC: Spec>(
     let val = ctx.builder.build_select(cmp, const_0, val, "")?;
 
     build_stack_push!(ctx, current, val);
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
+
     Ok(())
 }
 
-pub(crate) fn build_arithmetic_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_arithmetic_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 2, 0);
-
     let a = build_stack_pop!(ctx, current);
     let b = build_stack_pop!(ctx, current);
     let d = match current.op() {
@@ -116,22 +98,14 @@ pub(crate) fn build_arithmetic_op<'ctx, SPEC: Spec>(
     };
 
     build_stack_push!(ctx, current, d);
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
 
     Ok(())
 }
 
-pub(crate) fn build_cmp_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_cmp_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 2, 0);
-
     let a = build_stack_pop!(ctx, current);
     let b = build_stack_pop!(ctx, current);
 
@@ -151,22 +125,13 @@ pub(crate) fn build_cmp_op<'ctx, SPEC: Spec>(
 
     build_stack_push!(ctx, current, result);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
-
     Ok(())
 }
 
-pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_signextend_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 2, 0);
-
     let x = build_stack_pop!(ctx, current);
 
     let const_32 = ctx.types.type_stackel.const_int(32, false);
@@ -175,19 +140,22 @@ pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
         .build_int_compare(IntPredicate::UGE, x, const_32, "")?;
 
     let label = format!("i{}: Signextend / else", current.idx());
+    let join = format!("i{}: Signextend / join", current.idx());
     let index = format!("_{}", current.idx());
+
     let else_block = JitEvmEngineSimpleBlock::new(ctx, current.block().block, &label, &index)?;
+
+    let join_block = JitEvmEngineSimpleBlock::new(ctx, current.block().block, &join, &index)?;
+
     ctx.builder.position_at_end(current.block().block);
     ctx.builder
-        .build_conditional_branch(cmp, current.next().block, else_block.block)?;
+        .build_conditional_branch(cmp, join_block.block, else_block.block)?;
 
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
+    join_block.add_incoming(current.book_ref(), current.block());
     else_block.add_incoming(current.book_ref(), current.block());
 
     ctx.builder.position_at_end(else_block.block);
-    current.update_current_block(else_block);
+    current.insert_block(else_block.book(), else_block);
 
     let y = build_stack_pop!(ctx, current);
 
@@ -216,21 +184,20 @@ pub(crate) fn build_signextend_op<'ctx, SPEC: Spec>(
 
     build_stack_push!(ctx, current, result);
 
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
+    ctx.builder.build_unconditional_branch(join_block.block)?;
+    join_block.add_incoming(current.book_ref(), current.block());
+
+    ctx.builder.position_at_end(join_block.block);
+
+    current.insert_block(join_block.book(), join_block);
+
     Ok(())
 }
 
-pub(crate) fn build_mod_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_mod_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 3, 0);
-
     let a = build_stack_pop!(ctx, current);
     let b = build_stack_pop!(ctx, current);
     let n = build_stack_pop!(ctx, current);
@@ -267,11 +234,7 @@ pub(crate) fn build_mod_op<'ctx, SPEC: Spec>(
     let result = ctx.builder.build_select(cmp, const_0, result, "")?;
 
     build_stack_push!(ctx, current, result);
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
+
     Ok(())
 }
 
@@ -297,16 +260,14 @@ macro_rules! op2_i256_exp_bit {
 
 pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_stack_check!(ctx, current, 2, 0);
-
     let const_1 = ctx.types.type_stackel.const_int(1, false);
     let zero = ctx.types.type_stackel.const_int(0, false);
     let index = format!("_{}", current.idx());
 
     // SETUP BLOCK
-    let (a, exp, else_block, then_block) = {
+    let (a, exp, else_block, then_block, join_block) = {
         let a = build_stack_pop!(ctx, current);
         let exp = build_stack_pop!(ctx, current);
 
@@ -321,6 +282,9 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
         let then_block =
             JitEvmEngineSimpleBlock::new(ctx, current.block().block, &then_label, &index)?;
 
+        let join_label = format!("{}: Exp / join", current.idx());
+        let join_block = JitEvmEngineSimpleBlock::new(ctx, else_block.block, &join_label, &index)?;
+
         ctx.builder.position_at_end(current.block().block);
         ctx.builder
             .build_conditional_branch(is_zero, then_block.block, else_block.block)?;
@@ -328,28 +292,25 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
         else_block.add_incoming(current.book_ref(), current.block());
         then_block.add_incoming(current.book_ref(), current.block());
 
-        (a, exp, else_block, then_block)
+        (a, exp, else_block, then_block, join_block)
     };
 
     //// THEN BLOCK
     {
         ctx.builder.position_at_end(then_block.block);
-        current.update_current_block(then_block);
 
-        // static gas only
-        build_gas_check_exp!(ctx, current);
+        current.insert_block(then_block.book(), then_block);
 
         build_stack_push!(ctx, current, const_1);
 
-        let next = current.next();
-        next.add_incoming(current.book_ref(), current.block());
+        join_block.add_incoming(current.book_ref(), current.block());
 
-        ctx.builder.build_unconditional_branch(next.block)?;
+        ctx.builder.build_unconditional_branch(join_block.block)?;
     }
 
     //// ELSE BLOCK
     ctx.builder.position_at_end(else_block.block);
-    current.update_current_block(else_block);
+    current.insert_block(else_block.book(), else_block);
 
     let const8 = ctx.types.type_i64.const_int(8, false);
     let const1 = ctx.types.type_i64.const_int(1, false);
@@ -415,7 +376,8 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
         .build_conditional_branch(cond, loop_end_block.block, loop_block.block)?;
 
     ctx.builder.position_at_end(loop_end_block.block);
-    current.update_current_block(loop_end_block);
+    let book = loop_end_block.book();
+    current.insert_block(book, loop_end_block);
 
     let final_accum = ctx.builder.build_phi(ctx.types.type_stackel, "")?;
     final_accum.add_incoming(&[(&accum, loop_block.block)]);
@@ -423,30 +385,22 @@ pub(crate) fn build_exp_op<'ctx, SPEC: Spec>(
     let final_basic = final_accum.as_basic_value().into_int_value();
     build_stack_push!(ctx, current, final_basic);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
+    ctx.builder.build_unconditional_branch(join_block.block)?;
+    join_block.add_incoming(current.book_ref(), current.block());
+
+    ctx.builder.position_at_end(join_block.block);
+    current.insert_block(join_block.book(), join_block);
 
     Ok(())
 }
 
-pub(crate) fn build_not_op<'ctx, SPEC: Spec>(
+pub(crate) fn build_not_op<'ctx>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_gas_check!(ctx, current);
-    build_stack_check!(ctx, current, 1, 0);
-
     let a = build_stack_pop!(ctx, current);
     let d = ctx.builder.build_not(a, "")?;
     build_stack_push!(ctx, current, d);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }

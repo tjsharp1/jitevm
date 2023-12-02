@@ -340,4 +340,3 @@ fn operations_jit_test_calldataload() {
     }
 }
 expect_stack_underflow!(calldataload, EvmOp::Calldataload, 1);
-expect_stack_overflow!(calldataload, EvmOp::Calldataload, 1);

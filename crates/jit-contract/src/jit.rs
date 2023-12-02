@@ -1,6 +1,6 @@
 use crate::constants::*;
 use crate::{
-    code::{EvmOp, IndexedEvmCode},
+    code::{EvmBlock, EvmBlocks, EvmOp},
     jit::context::JitContractExecutionResult,
 };
 
@@ -12,7 +12,6 @@ mod cursor;
 mod error;
 mod ffi;
 pub mod gas;
-mod tracing;
 mod types;
 
 mod ops;
@@ -23,6 +22,5 @@ pub use context::{
     BlockConfig, DBBox, ExecutionResult, Halt, JitEvmExecutionContext, Success, TransactionConfig,
 };
 pub use error::JitEvmEngineError;
-pub use tracing::{TraceData, TracingOptions};
 
 pub mod contract;

@@ -72,18 +72,16 @@ macro_rules! build_sstore_gas_check {
         error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasBasicOutOfGas,
-        )?;
+        let code = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
+        let code = $ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt($ctx, &error_block.book(), code)?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
             .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
-        $current.update_current_block(next_block);
+        $current.insert_block(next_block.book(), next_block);
     };
 }
 
@@ -139,18 +137,16 @@ macro_rules! build_sload_gas_check {
         error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasBasicOutOfGas,
-        )?;
+        let code = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
+        let code = $ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt($ctx, &error_block.book(), code)?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
             .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
-        $current.update_current_block(next_block);
+        $current.insert_block(next_block.book(), next_block);
     };
 }
 
@@ -183,9 +179,8 @@ macro_rules! build_sha3_gas_check {
         let i1 = $ctx.builder.build_int_add(len, const_31, "")?;
         let word_size = $ctx.builder.build_right_shift(i1, const_5, false, "")?;
 
-        let (static_gas, dynamic_gas) = sha3_gas::<SPEC>();
+        let (_, dynamic_gas) = sha3_gas::<SPEC>();
 
-        let static_gas = $ctx.types.type_i64.const_int(static_gas, false);
         let dynamic_gas = $ctx.types.type_i64.const_int(dynamic_gas, false);
 
         let d1 = $ctx.builder.build_int_mul(dynamic_gas, word_size, "")?;
@@ -194,12 +189,10 @@ macro_rules! build_sha3_gas_check {
         let iszero =
             $ctx.builder
                 .build_int_compare(IntPredicate::EQ, len, const_0, "sha3_iszero")?;
-        let dynamic = $ctx
+        let gas_cost = $ctx
             .builder
             .build_select(iszero, const_0, dynamic, "dynamic_sha3")?
             .into_int_value();
-
-        let gas_cost = $ctx.builder.build_int_add(static_gas, dynamic, "")?;
 
         let cmp =
             $ctx.builder
@@ -235,18 +228,16 @@ macro_rules! build_sha3_gas_check {
         error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasMemory,
-        )?;
+        let code = u32::from(JitContractResultCode::OutOfGasMemory);
+        let code = $ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt($ctx, &error_block.book(), code)?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
             .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
-        $current.update_current_block(next_block);
+        $current.insert_block(next_block.book(), next_block);
     };
 }
 
@@ -338,10 +329,7 @@ macro_rules! build_memory_gas_check {
             )
             .expect("Expect intrinsic declaration not found!");
 
-        let expansion_cost = memory_expansion_cost!($ctx, $current, $offset, $len);
-        let const_cost = const_cost::<SPEC>($current.op());
-        let const_cost = $ctx.types.type_i64.const_int(const_cost, false);
-        let gas_cost = $ctx.builder.build_int_add(const_cost, expansion_cost, "")?;
+        let gas_cost = memory_expansion_cost!($ctx, $current, $offset, $len);
 
         let book = $current.book_ref();
         let cmp =
@@ -378,97 +366,20 @@ macro_rules! build_memory_gas_check {
         error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasMemory,
-        )?;
+        let code = u32::from(JitContractResultCode::OutOfGasMemory);
+        let code = $ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt($ctx, &error_block.book(), code)?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
             .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
-        $current.update_current_block(next_block);
-    };
-}
-
-macro_rules! build_gas_check {
-    ($ctx:ident, $current:ident) => {
-        use crate::jit::{
-            context::{JitContractExecutionResult, JitContractResultCode},
-            contract::JitEvmEngineSimpleBlock,
-        };
-        use inkwell::{intrinsics::Intrinsic, IntPredicate};
-
-        let expect = Intrinsic::find("llvm.expect").expect("expect intrinsic not found!");
-        let expect_fn = expect
-            .get_declaration(
-                &$ctx.module,
-                &[$ctx.types.type_bool.into(), $ctx.types.type_bool.into()],
-            )
-            .expect("Expect intrinsic declaration not found!");
-        let const_true = $ctx.types.type_bool.const_int(1, false);
-
-        let book = $current.book_ref();
-
-        let gas_cost = const_cost::<SPEC>($current.op());
-        let gas_cost = $ctx.types.type_i64.const_int(gas_cost, false);
-
-        let cmp =
-            $ctx.builder
-                .build_int_compare(IntPredicate::UGE, book.gas_remaining, gas_cost, "")?;
-        let cmp = $ctx
-            .builder
-            .build_call(expect_fn, &[cmp.into(), const_true.into()], "")?
-            .try_as_basic_value()
-            .left()
-            .ok_or(JitEvmEngineError::NoInstructionValue)?
-            .into_int_value();
-
-        let sub_gas = $ctx
-            .builder
-            .build_select(cmp, gas_cost, book.gas_remaining, "")?
-            .into_int_value();
-        let remaining = $ctx
-            .builder
-            .build_int_sub(book.gas_remaining, sub_gas, "deduct_gas")?;
-        $current.book_ref_mut().update_gas(remaining);
-
-        let instruction_label = format!("i{}_enough_gas", $current.idx());
-        let idx = format!("_{}", $current.idx());
-        let next_block =
-            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
-
-        let instruction_label = format!("i{}_error", $current.idx());
-        let idx = format!("_{}", $current.idx());
-        let error_block =
-            JitEvmEngineSimpleBlock::new($ctx, $current.block().block, &instruction_label, &idx)?;
-
-        next_block.add_incoming($current.book_ref(), $current.block());
-        error_block.add_incoming($current.book_ref(), $current.block());
-
-        $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasBasicOutOfGas,
-        )?;
-
-        $ctx.builder.position_at_end($current.block().block);
-        $ctx.builder
-            .build_conditional_branch(cmp, next_block.block, error_block.block)?;
-        $ctx.builder.position_at_end(next_block.block);
-
-        $current.update_current_block(next_block);
+        $current.insert_block(next_block.book(), next_block);
     };
 }
 
 macro_rules! build_gas_check_exp {
-    ($ctx:ident, $current:ident) => {
-        let const_zero = $ctx.types.type_i64.const_int(0, false);
-        build_gas_check_exp!($ctx, $current, const_zero);
-    };
     ($ctx:ident, $current:ident, $exp:ident) => {{
         use crate::jit::{
             context::{JitContractExecutionResult, JitContractResultCode},
@@ -487,16 +398,12 @@ macro_rules! build_gas_check_exp {
 
         let book = $current.book_ref();
 
-        let (base_gas, byte_gas) = exp_cost::<SPEC>();
-        let base_gas_cost = $ctx.types.type_i64.const_int(base_gas, false);
+        let (_, byte_gas) = exp_cost::<SPEC>();
         let byte_gas_cost = $ctx.types.type_i64.const_int(byte_gas, false);
 
-        let exp_gas = $ctx
-            .builder
-            .build_int_mul(byte_gas_cost, $exp, "exp_byte_cost")?;
         let gas_cost = $ctx
             .builder
-            .build_int_add(base_gas_cost, exp_gas, "exp_gas")?;
+            .build_int_mul(byte_gas_cost, $exp, "exp_byte_cost")?;
 
         let cmp =
             $ctx.builder
@@ -540,18 +447,16 @@ macro_rules! build_gas_check_exp {
         error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasBasicOutOfGas,
-        )?;
+        let code = u32::from(JitContractResultCode::OutOfGasBasicOutOfGas);
+        let code = $ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt($ctx, &error_block.book(), code)?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
             .build_conditional_branch(cmp, next_block.block, error_block.block)?;
         $ctx.builder.position_at_end(next_block.block);
 
-        $current.update_current_block(next_block);
+        $current.insert_block(next_block.book(), next_block);
     }};
 }
 
@@ -679,6 +584,7 @@ pub fn const_cost<SPEC: Spec>(op: EvmOp) -> u64 {
     }
 
     match op {
+        EvmOp::Exp => 10,
         EvmOp::Iszero => 3,
         EvmOp::Byte => 3,
         EvmOp::Add => 3,
@@ -765,11 +671,15 @@ pub fn const_cost<SPEC: Spec>(op: EvmOp) -> u64 {
         EvmOp::Calldatasize => 2,
         EvmOp::AugmentedPushJumpi(_, _) => 13,
         EvmOp::AugmentedPushJump(_, _) => 11,
+        EvmOp::Stop => 0,
+        EvmOp::Sstore => 0,
+        EvmOp::Sload => 0,
+        EvmOp::Sha3 => 30,
+        EvmOp::Invalid => 0,
         _ => unimplemented!("Gas cost for {:?} unimplemented!", op),
     }
 }
 
-pub(crate) use build_gas_check;
 pub(crate) use build_gas_check_exp;
 pub(crate) use build_memory_gas_check;
 pub(crate) use build_sha3_gas_check;

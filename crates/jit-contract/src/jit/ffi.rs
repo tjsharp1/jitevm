@@ -1,13 +1,13 @@
 use crate::jit::{
     context::JitEvmPtrs,
     contract::BuilderContext,
-    cursor::CurrentInstruction,
+    cursor::Current,
     error::JitEvmEngineError,
     gas::{
         build_sha3_gas_check, build_sload_gas_check, build_sstore_gas_check, memory_expansion_cost,
         memory_gas, sha3_gas,
     },
-    ops::{build_stack_check, build_stack_inc, build_stack_pop},
+    ops::{build_stack_inc, build_stack_pop},
     types::JitTypes,
 };
 use alloy_primitives::U256;
@@ -126,10 +126,8 @@ impl<'ctx> HostFunctions<'ctx> {
     pub(crate) fn build_sha3<'a, SPEC: Spec>(
         &self,
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_stack_check!(ctx, current, 2, 0);
-
         let offset = build_stack_pop!(ctx, current);
         let size = build_stack_pop!(ctx, current);
         build_sha3_gas_check!(ctx, current, offset, size);
@@ -155,21 +153,14 @@ impl<'ctx> HostFunctions<'ctx> {
         )?;
         build_stack_inc!(ctx, current);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
     pub(crate) fn build_sload<'a>(
         &self,
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_stack_check!(ctx, current, 1, 0);
-
         let book = current.book_ref();
         let gas = ctx
             .builder
@@ -185,21 +176,14 @@ impl<'ctx> HostFunctions<'ctx> {
 
         build_sload_gas_check!(ctx, current, gas);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 
     pub(crate) fn build_sstore<'a>(
         &self,
         ctx: &BuilderContext<'ctx>,
-        current: &mut CurrentInstruction<'a, 'ctx>,
+        current: &mut Current<'a, 'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        build_stack_check!(ctx, current, 2, 0);
-
         let book = current.book_ref();
         let _ = ctx
             .builder
@@ -218,11 +202,6 @@ impl<'ctx> HostFunctions<'ctx> {
 
         build_sstore_gas_check!(ctx, current, gas, refund);
 
-        ctx.builder
-            .build_unconditional_branch(current.next().block)?;
-        current
-            .next()
-            .add_incoming(current.book_ref(), current.block());
         Ok(())
     }
 }

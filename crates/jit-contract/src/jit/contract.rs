@@ -1,5 +1,5 @@
 use crate::{
-    code::{EvmOp, IndexedEvmCode},
+    code::{EvmCode, EvmOp, EvmOpParserMode},
     jit::{
         self,
         context::{BlockContext, JitContractExecutionResult, JitEvmPtrs, TransactionContext},
@@ -7,7 +7,6 @@ use crate::{
         error::JitEvmEngineError,
         gas::init_gas,
         ops,
-        tracing::{Tracers, TracingOptions},
         types::JitTypes,
         ExecutionResult,
     },
@@ -20,7 +19,7 @@ use inkwell::module::Module;
 use inkwell::targets::{InitializationConfig, Target};
 use inkwell::values::{IntValue, PhiValue};
 use inkwell::OptimizationLevel;
-use revm_primitives::Spec;
+use revm_primitives::{Bytes, Spec};
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize, u64) -> ();
 
@@ -187,7 +186,6 @@ impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
         &self,
         context: &mut jit::JitEvmExecutionContext<SPEC>,
     ) -> Result<ExecutionResult, JitEvmEngineError> {
-        // TODO: check gas_limits here, or from caller
         let init_gas = init_gas::<SPEC>(context.calldata());
 
         unsafe {
@@ -218,7 +216,6 @@ pub struct JitContractBuilder<'ctx> {
     pub debug_asm: Option<String>,
     pub host_functions: jit::HostFunctions<'ctx>,
     pub execution_engine: ExecutionEngine<'ctx>,
-    pub tracing_options: TracingOptions,
 }
 
 impl<'ctx> JitContractBuilder<'ctx> {
@@ -245,13 +242,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             debug_ir: None,
             debug_asm: None,
             host_functions,
-            tracing_options: TracingOptions::default(),
         })
-    }
-
-    pub fn cycle_breakpoint(mut self, cycles: u64) -> Self {
-        self.tracing_options.cycle_breakpoint = Some(cycles);
-        self
     }
 
     pub fn debug_ir(mut self, filename: &str) -> Self {
@@ -267,7 +258,8 @@ impl<'ctx> JitContractBuilder<'ctx> {
     pub fn build<SPEC: Spec>(
         self,
         spec: SPEC,
-        code: IndexedEvmCode,
+        code: &Bytes,
+        mode: EvmOpParserMode,
     ) -> Result<JitEvmContract<'ctx, SPEC>, JitEvmEngineError> {
         let JitContractBuilder {
             ctx,
@@ -275,119 +267,130 @@ impl<'ctx> JitContractBuilder<'ctx> {
             debug_ir,
             debug_asm,
             host_functions,
-            tracing_options,
         } = self;
 
-        let tracer = Tracers::initialize(&ctx, &execution_engine, tracing_options);
-        let cursor = cursor::InstructionCursor::new(&ctx, code)?;
-        let mut iter = cursor.iter();
+        let code = EvmCode::new_from_bytes(code, mode)?
+            .augment()
+            .blocks::<SPEC>();
 
-        // RENDER INSTRUCTIONS
+        let block_cursor = cursor::BlockCursor::new(&ctx, code)?;
+        let mut block_iter = block_cursor.iter();
 
-        while let Some(current) = iter.next() {
+        while let Some(current_block) = block_iter.next() {
             use EvmOp::*;
 
-            ctx.builder.position_at_end(current.block().block);
+            ctx.builder.position_at_end(current_block.block().block);
 
-            // pre-opcode tracing
-            tracer.step(&ctx, current)?;
+            ops::insert_block_checks(&ctx, current_block)?;
 
-            match current.op() {
-                Stop => ops::build_stop_op(&ctx, current)?,
-                Push(_, val) => ops::build_push_op::<SPEC>(&ctx, current, val)?,
-                Pop => ops::build_pop_op::<SPEC>(&ctx, current)?,
-                Jumpdest => ops::build_jumpdest_op::<SPEC>(&ctx, current)?,
-                Mstore => ops::build_mstore_op::<SPEC>(&ctx, current)?,
-                Mstore8 => ops::build_mstore8_op::<SPEC>(&ctx, current)?,
-                Mload => ops::build_mload_op::<SPEC>(&ctx, current)?,
-                Sload => host_functions.build_sload(&ctx, current)?,
-                Sstore => host_functions.build_sstore(&ctx, current)?,
-                Sha3 => host_functions.build_sha3::<SPEC>(&ctx, current)?,
-                Jump => ops::build_jump_op::<SPEC>(&ctx, current)?,
-                Jumpi => ops::build_jumpi_op::<SPEC>(&ctx, current)?,
-                Swap1 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap2 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap3 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap4 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap5 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap6 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap7 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap8 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap9 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap10 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap11 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap12 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap13 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap14 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap15 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Swap16 => ops::build_stack_swap_op::<SPEC>(&ctx, current)?,
-                Dup1 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup2 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup3 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup4 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup5 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup6 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup7 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup8 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup9 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup10 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup11 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup12 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup13 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup14 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup15 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Dup16 => ops::build_dup_op::<SPEC>(&ctx, current)?,
-                Iszero => ops::iszero_op::<SPEC>(&ctx, current)?,
-                Add => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Sub => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Mul => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Div => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Sdiv => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Mod => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Smod => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Shl => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Shr => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Sar => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                And => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Or => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Xor => ops::build_arithmetic_op::<SPEC>(&ctx, current)?,
-                Exp => ops::build_exp_op::<SPEC>(&ctx, current)?,
-                Eq => ops::build_cmp_op::<SPEC>(&ctx, current)?,
-                Lt => ops::build_cmp_op::<SPEC>(&ctx, current)?,
-                Gt => ops::build_cmp_op::<SPEC>(&ctx, current)?,
-                Slt => ops::build_cmp_op::<SPEC>(&ctx, current)?,
-                Sgt => ops::build_cmp_op::<SPEC>(&ctx, current)?,
-                Not => ops::build_not_op::<SPEC>(&ctx, current)?,
-                Byte => ops::build_byte_op::<SPEC>(&ctx, current)?,
-                Addmod => ops::build_mod_op::<SPEC>(&ctx, current)?,
-                Mulmod => ops::build_mod_op::<SPEC>(&ctx, current)?,
-                Invalid => ops::build_invalid_op(&ctx, current)?,
-                Revert => ops::build_revert_op::<SPEC>(&ctx, current)?,
-                Return => ops::build_return_op::<SPEC>(&ctx, current)?,
-                Signextend => ops::build_signextend_op::<SPEC>(&ctx, current)?,
-                GasLimit => BlockContext::build_get_gas_limit::<SPEC>(&ctx, current)?,
-                BaseFee => BlockContext::build_get_basefee::<SPEC>(&ctx, current)?,
-                PrevRandao => BlockContext::build_get_randao::<SPEC>(&ctx, current)?,
-                Timestamp => BlockContext::build_get_timestamp::<SPEC>(&ctx, current)?,
-                Coinbase => BlockContext::build_get_coinbase::<SPEC>(&ctx, current)?,
-                Number => BlockContext::build_get_number::<SPEC>(&ctx, current)?,
-                Codesize => TransactionContext::build_get_codesize::<SPEC>(&ctx, current)?,
-                Caller => TransactionContext::build_get_caller::<SPEC>(&ctx, current)?,
-                Callvalue => TransactionContext::build_get_callvalue::<SPEC>(&ctx, current)?,
-                Calldataload => TransactionContext::build_get_calldata::<SPEC>(&ctx, current)?,
-                Calldatasize => TransactionContext::build_get_calldatalen::<SPEC>(&ctx, current)?,
-                Origin => TransactionContext::build_get_origin::<SPEC>(&ctx, current)?,
-                AugmentedPushJump(_, val) => {
-                    ops::build_augmented_jump_op::<SPEC>(&ctx, current, val)?
+            let mut instruction_iter = current_block.instruction_iter();
+
+            while let Some(current) = instruction_iter.next() {
+                match current.op() {
+                    Add => ops::build_arithmetic_op(&ctx, current)?,
+                    Sub => ops::build_arithmetic_op(&ctx, current)?,
+                    Mul => ops::build_arithmetic_op(&ctx, current)?,
+                    Div => ops::build_arithmetic_op(&ctx, current)?,
+                    Sdiv => ops::build_arithmetic_op(&ctx, current)?,
+                    Mod => ops::build_arithmetic_op(&ctx, current)?,
+                    Smod => ops::build_arithmetic_op(&ctx, current)?,
+                    Shl => ops::build_arithmetic_op(&ctx, current)?,
+                    Shr => ops::build_arithmetic_op(&ctx, current)?,
+                    Sar => ops::build_arithmetic_op(&ctx, current)?,
+                    And => ops::build_arithmetic_op(&ctx, current)?,
+                    Or => ops::build_arithmetic_op(&ctx, current)?,
+                    Xor => ops::build_arithmetic_op(&ctx, current)?,
+                    Slt => ops::build_cmp_op(&ctx, current)?,
+                    Sgt => ops::build_cmp_op(&ctx, current)?,
+                    Not => ops::build_not_op(&ctx, current)?,
+                    Byte => ops::build_byte_op(&ctx, current)?,
+                    Addmod => ops::build_mod_op(&ctx, current)?,
+                    Mulmod => ops::build_mod_op(&ctx, current)?,
+                    Signextend => ops::build_signextend_op(&ctx, current)?,
+                    Iszero => ops::iszero_op(&ctx, current)?,
+                    Exp => ops::build_exp_op::<SPEC>(&ctx, current)?,
+                    Eq => ops::build_cmp_op(&ctx, current)?,
+                    Lt => ops::build_cmp_op(&ctx, current)?,
+                    Gt => ops::build_cmp_op(&ctx, current)?,
+                    Stop => ops::build_stop_op(&ctx, current)?,
+                    Push(_, val) => ops::build_push_op(&ctx, current, val)?,
+                    Pop => ops::build_pop_op(&ctx, current)?,
+                    Swap1 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap2 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap3 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap4 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap5 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap6 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap7 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap8 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap9 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap10 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap11 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap12 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap13 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap14 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap15 => ops::build_stack_swap_op(&ctx, current)?,
+                    Swap16 => ops::build_stack_swap_op(&ctx, current)?,
+                    Dup1 => ops::build_dup_op(&ctx, current)?,
+                    Dup2 => ops::build_dup_op(&ctx, current)?,
+                    Dup3 => ops::build_dup_op(&ctx, current)?,
+                    Dup4 => ops::build_dup_op(&ctx, current)?,
+                    Dup5 => ops::build_dup_op(&ctx, current)?,
+                    Dup6 => ops::build_dup_op(&ctx, current)?,
+                    Dup7 => ops::build_dup_op(&ctx, current)?,
+                    Dup8 => ops::build_dup_op(&ctx, current)?,
+                    Dup9 => ops::build_dup_op(&ctx, current)?,
+                    Dup10 => ops::build_dup_op(&ctx, current)?,
+                    Dup11 => ops::build_dup_op(&ctx, current)?,
+                    Dup12 => ops::build_dup_op(&ctx, current)?,
+                    Dup13 => ops::build_dup_op(&ctx, current)?,
+                    Dup14 => ops::build_dup_op(&ctx, current)?,
+                    Dup15 => ops::build_dup_op(&ctx, current)?,
+                    Dup16 => ops::build_dup_op(&ctx, current)?,
+                    Mstore => ops::build_mstore_op::<SPEC>(&ctx, current)?,
+                    Mstore8 => ops::build_mstore8_op::<SPEC>(&ctx, current)?,
+                    Mload => ops::build_mload_op::<SPEC>(&ctx, current)?,
+                    Sload => host_functions.build_sload(&ctx, current)?,
+                    Sstore => host_functions.build_sstore(&ctx, current)?,
+                    Sha3 => host_functions.build_sha3::<SPEC>(&ctx, current)?,
+                    Invalid => ops::build_invalid_op(&ctx, current)?,
+                    Revert => ops::build_revert_op::<SPEC>(&ctx, current)?,
+                    Return => ops::build_return_op::<SPEC>(&ctx, current)?,
+                    GasLimit => BlockContext::build_get_gas_limit(&ctx, current)?,
+                    BaseFee => BlockContext::build_get_basefee(&ctx, current)?,
+                    PrevRandao => BlockContext::build_get_randao(&ctx, current)?,
+                    Timestamp => BlockContext::build_get_timestamp(&ctx, current)?,
+                    Coinbase => BlockContext::build_get_coinbase(&ctx, current)?,
+                    Number => BlockContext::build_get_number(&ctx, current)?,
+                    Codesize => TransactionContext::build_get_codesize(&ctx, current)?,
+                    Caller => TransactionContext::build_get_caller(&ctx, current)?,
+                    Callvalue => TransactionContext::build_get_callvalue(&ctx, current)?,
+                    Calldataload => TransactionContext::build_get_calldata(&ctx, current)?,
+                    Calldatasize => TransactionContext::build_get_calldatalen(&ctx, current)?,
+                    Origin => TransactionContext::build_get_origin(&ctx, current)?,
+                    Jumpdest => ops::build_jumpdest_op(&ctx, current)?,
+                    Jump => ops::build_jump_op(&ctx, current)?,
+                    Jumpi => ops::build_jumpi_op(&ctx, current)?,
+                    AugmentedPushJump(_, val) => ops::build_augmented_jump_op(&ctx, current, val)?,
+                    AugmentedPushJumpi(_, val) => {
+                        ops::build_augmented_jumpi_op(&ctx, current, val)?
+                    }
+                    _ => panic!(
+                        "Unimplemented instruction {}: {:?}",
+                        current.idx(),
+                        current.op()
+                    ),
                 }
-                AugmentedPushJumpi(_, val) => {
-                    ops::build_augmented_jumpi_op::<SPEC>(&ctx, current, val)?
+
+                if !current.op().is_block_terminal() && current.is_last_instruction() {
+                    let next = current.next_block();
+                    next.add_incoming(current.book_ref(), current.block());
+                    ctx.builder.build_unconditional_branch(next.block)?;
                 }
-                _ => {
-                    panic!("Op not implemented: {:?}", current.op());
-                }
-            };
+            }
         }
+
+        //// RENDER INSTRUCTIONS
 
         // OUTPUT LLVM
         if let Some(path) = debug_ir {

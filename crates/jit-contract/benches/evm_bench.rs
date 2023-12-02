@@ -1,13 +1,13 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use inkwell::context::Context;
-use jit_contract::code::{EvmCode, EvmOpParserMode};
+use jit_contract::code::EvmOpParserMode;
 use jit_contract::jit::{
     contract::{JitContractBuilder, JitEvmContract},
     JitEvmExecutionContext,
 };
 use revm::{
     db::in_memory_db::BenchmarkDB,
-    primitives::{address, Address, Bytecode, Bytes, Env, U256},
+    primitives::{address, Bytecode, Bytes, Env, U256},
     EVM,
 };
 use revm_primitives::{LatestSpec, Spec};
@@ -26,7 +26,7 @@ fn workspace_dir() -> PathBuf {
     cargo_path.parent().unwrap().to_path_buf()
 }
 
-fn load_evm_code(test_name: &str) -> EvmCode {
+fn load_evm_code(test_name: &str) -> Bytes {
     let workspace_dir = workspace_dir();
 
     let mut path = PathBuf::new();
@@ -37,11 +37,11 @@ fn load_evm_code(test_name: &str) -> EvmCode {
     let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
     let bytes = hex::decode(bytecode).expect("Invalid hex data");
 
-    EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict).expect("Failed parsing EVM opcodes")
+    Bytes::copy_from_slice(&bytes)
 }
 
-fn get_env_args(code: EvmCode) -> (Env, BenchmarkDB) {
-    let bytes = Bytes::copy_from_slice(&code.to_bytes());
+fn get_env_args(code: Bytes) -> (Env, BenchmarkDB) {
+    let bytes = Bytes::copy_from_slice(&code);
     let bytecode = Bytecode::new_raw(bytes).to_checked();
     let database = BenchmarkDB::new_bytecode(bytecode);
 
@@ -114,56 +114,56 @@ pub fn jitevm_benchmark(c: &mut Criterion) {
     let (_, args1) = get_env_args(code.clone());
     let contract1 = JitContractBuilder::with_context("contract1", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("fibonacci_repetitions");
     let (_, args2) = get_env_args(code.clone());
     let contract2 = JitContractBuilder::with_context("contract2", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("exp");
     let (_, args3) = get_env_args(code.clone());
     let contract3 = JitContractBuilder::with_context("contract3", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("mload");
     let (_, args4) = get_env_args(code.clone());
     let contract4 = JitContractBuilder::with_context("contract4", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("mstore8");
     let (_, args5) = get_env_args(code.clone());
     let contract5 = JitContractBuilder::with_context("contract5", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("sha3");
     let (_, args6) = get_env_args(code.clone());
     let contract6 = JitContractBuilder::with_context("contract6", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("store");
     let (_, args7) = get_env_args(code.clone());
     let contract7 = JitContractBuilder::with_context("contract7", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let code = load_evm_code("sload");
     let (_, args8) = get_env_args(code.clone());
     let contract8 = JitContractBuilder::with_context("contract8", &context)
         .expect("Could not build builder")
-        .build(LatestSpec, code.augment().index())
+        .build(LatestSpec, &code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let mut group = c.benchmark_group("JIT benchmarks");

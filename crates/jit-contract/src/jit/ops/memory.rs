@@ -1,11 +1,9 @@
-use crate::jit::ops::{
-    build_stack_check, build_stack_pop, build_stack_pop_vector, build_stack_push_vector,
-};
+use crate::jit::ops::{build_stack_pop, build_stack_pop_vector, build_stack_push_vector};
 use crate::jit::{
     context::JitEvmPtrs,
     contract::BuilderContext,
-    cursor::CurrentInstruction,
-    gas::{build_memory_gas_check, const_cost, memory_expansion_cost, memory_gas},
+    cursor::Current,
+    gas::{build_memory_gas_check, memory_expansion_cost, memory_gas},
     JitEvmEngineError, EVM_JIT_STACK_ALIGN,
 };
 use inkwell::{values::BasicValue, AddressSpace};
@@ -33,27 +31,23 @@ macro_rules! build_memory_limit_check {
         error_block.add_incoming($current.book_ref(), $current.block());
 
         $ctx.builder.position_at_end(error_block.block);
-        JitContractExecutionResult::build_exit_halt(
-            $ctx,
-            &error_block,
-            JitContractResultCode::OutOfGasMemoryLimit,
-        )?;
+        let code = u32::from(JitContractResultCode::OutOfGasMemoryLimit);
+        let code = $ctx.types.type_i64.const_int(code as u64, false);
+        JitContractExecutionResult::build_exit_halt($ctx, &error_block.book(), code)?;
 
         $ctx.builder.position_at_end($current.block().block);
         $ctx.builder
             .build_conditional_branch(cmp, next_block.block, error_block.block)?;
 
         $ctx.builder.position_at_end(next_block.block);
-        $current.update_current_block(next_block);
+        $current.insert_block(next_block.book(), next_block);
     }};
 }
 
 pub(crate) fn build_mstore_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_stack_check!(ctx, current, 2, 0);
-
     let offset = build_stack_pop!(ctx, current);
     build_memory_gas_check!(ctx, current, offset, 32);
 
@@ -83,20 +77,13 @@ pub(crate) fn build_mstore_op<'ctx, SPEC: Spec>(
         .build_store(dest_ptr, shuffled)?
         .set_alignment(1)?;
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
 pub(crate) fn build_mstore8_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_stack_check!(ctx, current, 2, 0);
-
     let offset = build_stack_pop!(ctx, current);
     let value = build_stack_pop!(ctx, current);
 
@@ -121,20 +108,13 @@ pub(crate) fn build_mstore8_op<'ctx, SPEC: Spec>(
 
     ctx.builder.build_store(dest_ptr, value)?;
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }
 
 pub(crate) fn build_mload_op<'ctx, SPEC: Spec>(
     ctx: &BuilderContext<'ctx>,
-    current: &mut CurrentInstruction<'_, 'ctx>,
+    current: &mut Current<'_, 'ctx>,
 ) -> Result<(), JitEvmEngineError> {
-    build_stack_check!(ctx, current, 1, 0);
-
     let offset = build_stack_pop!(ctx, current);
 
     build_memory_gas_check!(ctx, current, offset, 32);
@@ -188,10 +168,5 @@ pub(crate) fn build_mload_op<'ctx, SPEC: Spec>(
 
     build_stack_push_vector!(ctx, current, shuffled);
 
-    ctx.builder
-        .build_unconditional_branch(current.next().block)?;
-    current
-        .next()
-        .add_incoming(current.book_ref(), current.block());
     Ok(())
 }

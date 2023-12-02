@@ -1,6 +1,6 @@
 use crate::jit::{
     context::TransactionContext,
-    contract::{BuilderContext, JitEvmEngineSimpleBlock},
+    contract::{BuilderContext, JitEvmEngineBookkeeping},
     JitEvmEngineError,
 };
 use inkwell::{
@@ -160,7 +160,7 @@ impl From<JitContractExecutionResult> for ExecutionResult {
 }
 
 // TODO: handle all the below return codes...
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub(crate) enum JitContractResultCode {
     SuccessStop,
     SuccessReturn,
@@ -319,11 +319,9 @@ impl<'ctx> JitContractExecutionResult {
 
     pub fn build_exit_halt(
         ctx: &BuilderContext<'ctx>,
-        block: &JitEvmEngineSimpleBlock<'ctx>,
-        code: JitContractResultCode,
+        book: &JitEvmEngineBookkeeping<'ctx>,
+        code: IntValue<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = block.book();
-
         let function = ctx
             .module
             .get_function("executecontract")
@@ -342,9 +340,7 @@ impl<'ctx> JitContractExecutionResult {
             "result_code_offset",
         )?;
 
-        let result = u32::from(code);
-        let error_code = ctx.types.type_i32.const_int(result as u64, false);
-        ctx.builder.build_store(result_code_ptr, error_code)?;
+        ctx.builder.build_store(result_code_ptr, code)?;
 
         let gas_used_ptr =
             ctx.builder
@@ -359,12 +355,10 @@ impl<'ctx> JitContractExecutionResult {
 
     pub fn build_exit_return(
         ctx: &BuilderContext<'ctx>,
-        block: &JitEvmEngineSimpleBlock<'ctx>,
+        book: &JitEvmEngineBookkeeping<'ctx>,
         offset: IntValue<'ctx>,
         size: IntValue<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = block.book();
-
         let function = ctx
             .module
             .get_function("executecontract")
@@ -434,10 +428,8 @@ impl<'ctx> JitContractExecutionResult {
 
     pub fn build_exit_stop(
         ctx: &BuilderContext<'ctx>,
-        block: &JitEvmEngineSimpleBlock<'ctx>,
+        book: &JitEvmEngineBookkeeping<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = block.book();
-
         let function = ctx
             .module
             .get_function("executecontract")
@@ -484,12 +476,10 @@ impl<'ctx> JitContractExecutionResult {
 
     pub fn build_exit_revert(
         ctx: &BuilderContext<'ctx>,
-        block: &JitEvmEngineSimpleBlock<'ctx>,
+        book: &JitEvmEngineBookkeeping<'ctx>,
         offset: IntValue<'ctx>,
         size: IntValue<'ctx>,
     ) -> Result<(), JitEvmEngineError> {
-        let book = block.book();
-
         let function = ctx
             .module
             .get_function("executecontract")

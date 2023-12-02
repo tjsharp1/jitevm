@@ -1,4 +1,6 @@
+use crate::jit::gas::const_cost;
 use alloy_primitives::U256;
+use revm_primitives::Spec;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
@@ -284,6 +286,144 @@ impl EvmOp {
 
             Unknown(opcode) => *opcode as u16,
         }
+    }
+
+    pub fn stack(&self) -> (i64, i64) {
+        use EvmOp::*;
+
+        match self {
+            Stop => (0, 0),
+            Jumpdest => (0, 0),
+            Add => (2, 1),
+            Mul => (2, 1),
+            Sub => (2, 1),
+            Div => (2, 1),
+            Sdiv => (2, 1),
+            Mod => (2, 1),
+            Smod => (2, 1),
+            Exp => (2, 1),
+            Signextend => (2, 1),
+            Lt => (2, 1),
+            Gt => (2, 1),
+            Slt => (2, 1),
+            Sgt => (2, 1),
+            Eq => (2, 1),
+            And => (2, 1),
+            Or => (2, 1),
+            Xor => (2, 1),
+            Byte => (2, 1),
+            Shl => (2, 1),
+            Shr => (2, 1),
+            Sar => (2, 1),
+            Sha3 => (2, 1),
+            Addmod => (3, 1),
+            Mulmod => (3, 1),
+            Balance => (1, 1),
+            BlockHash => (1, 1),
+            Calldataload => (1, 1),
+            ExtCodeHash => (1, 1),
+            ExtCodeSize => (1, 1),
+            Iszero => (1, 1),
+            Mload => (1, 1),
+            Not => (1, 1),
+            Sload => (1, 1),
+            Address => (0, 1),
+            SelfBalance => (0, 1),
+            BaseFee => (0, 1),
+            PrevRandao => (0, 1),
+            GasLimit => (0, 1),
+            ChainId => (0, 1),
+            Coinbase => (0, 1),
+            Timestamp => (0, 1),
+            Number => (0, 1),
+            GasPrice => (0, 1),
+            Origin => (0, 1),
+            Caller => (0, 1),
+            Callvalue => (0, 1),
+            Calldatasize => (0, 1),
+            Codesize => (0, 1),
+            ReturnDataSize => (0, 1),
+            Pc => (0, 1),
+            Msize => (0, 1),
+            Gas => (0, 1),
+            CalldataCopy => (3, 0),
+            CodeCopy => (3, 0),
+            ReturnDataCopy => (3, 0),
+            ExtCodeCopy => (4, 0),
+            Pop => (1, 0),
+            Jump => (1, 0),
+            Mstore => (2, 0),
+            Mstore8 => (2, 0),
+            Sstore => (2, 0),
+            Jumpi => (2, 0),
+            Push(_, _) => (0, 1),
+            Dup1 => (1, 2),
+            Dup2 => (2, 3),
+            Dup3 => (3, 4),
+            Dup4 => (4, 5),
+            Dup5 => (5, 6),
+            Dup6 => (6, 7),
+            Dup7 => (7, 8),
+            Dup8 => (8, 9),
+            Dup9 => (9, 10),
+            Dup10 => (10, 11),
+            Dup11 => (11, 12),
+            Dup12 => (12, 13),
+            Dup13 => (13, 14),
+            Dup14 => (14, 15),
+            Dup15 => (15, 16),
+            Dup16 => (16, 17),
+            Swap1 => (2, 2),
+            Swap2 => (3, 3),
+            Swap3 => (4, 4),
+            Swap4 => (5, 5),
+            Swap5 => (6, 6),
+            Swap6 => (7, 7),
+            Swap7 => (8, 8),
+            Swap8 => (9, 9),
+            Swap9 => (10, 10),
+            Swap10 => (11, 11),
+            Swap11 => (12, 12),
+            Swap12 => (13, 13),
+            Swap13 => (14, 14),
+            Swap14 => (15, 15),
+            Swap15 => (16, 16),
+            Swap16 => (17, 17),
+            Log0 => (2, 0),
+            Log1 => (3, 0),
+            Log2 => (4, 0),
+            Log3 => (5, 0),
+            Log4 => (6, 0),
+            Create => (3, 1),
+            Call => (7, 1),
+            CallCode => (7, 1),
+            Return => (2, 0),
+            DelegateCall => (6, 1),
+            Create2 => (4, 1),
+            StaticCall => (6, 1),
+            Revert => (2, 0),
+            Invalid => (0, 0),
+            Selfdestruct => (1, 0),
+            AugmentedPushJump(_, _) => (0, 0),
+            AugmentedPushJumpi(_, _) => (1, 0),
+            Unknown(_) => (0, 0),
+        }
+    }
+
+    pub fn is_block_terminal(&self) -> bool {
+        use EvmOp::*;
+
+        matches!(
+            self,
+            Stop | Jump
+                | Jumpi
+                | Return
+                | Revert
+                | Invalid
+                | Selfdestruct
+                | AugmentedPushJump(_, _)
+                | AugmentedPushJumpi(_, _)
+        )
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -583,7 +723,7 @@ pub struct EvmCode {
     pub ops: Vec<EvmOp>,
 }
 
-#[derive(Error, Debug)]
+#[derive(Eq, Error, Debug, PartialEq)]
 pub enum EvmCodeError {
     #[error("parser error: incomplete instruction (PUSH) at offset {0}")]
     ParserErrorIncompleteInstruction(usize),
@@ -652,44 +792,194 @@ impl EvmCode {
         Self { ops }
     }
 
-    pub fn index(&self) -> IndexedEvmCode {
-        IndexedEvmCode::new_from_evmcode(self.clone())
+    pub fn blocks<SPEC: Spec>(self) -> EvmBlocks {
+        EvmBlocks::new_from_evmcode::<SPEC>(self)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct IndexedEvmCode {
+pub struct EvmBlocks {
     pub len: usize,
-    pub code: EvmCode,
-    pub opidx2target: HashMap<usize, U256>,
-    pub target2opidx: HashMap<U256, usize>,
+    pub blocks: Vec<EvmBlock>,
+    pub opidx2target: HashMap<usize, usize>,
+    pub target2blockidx: HashMap<usize, usize>,
     pub jumpdests: HashSet<usize>,
 }
 
-impl IndexedEvmCode {
-    pub fn new_from_evmcode(code: EvmCode) -> Self {
+impl EvmBlocks {
+    pub fn new_from_evmcode<SPEC: Spec>(code: EvmCode) -> Self {
         let len = code.to_bytes().len();
         let mut opidx2target = HashMap::new();
-        let mut target2opidx = HashMap::new();
+        let mut target2blockidx = HashMap::new();
         let mut jumpdests = HashSet::new();
+
+        let mut blocks = Vec::new();
+        let mut blockidx = blocks.len();
+        blocks.push(EvmBlock::new(0));
 
         let mut target = 0;
         for opidx in 0..code.ops.len() {
-            opidx2target.insert(opidx, U256::from(target));
-            target2opidx.insert(U256::from(target), opidx);
-            target += code.ops[opidx].len();
+            opidx2target.insert(opidx, target);
 
             if code.ops[opidx] == EvmOp::Jumpdest {
-                jumpdests.insert(opidx);
+                blockidx = blocks.len();
+                blocks.push(EvmBlock::new(opidx));
+
+                target2blockidx.insert(target, blockidx);
+                jumpdests.insert(blockidx);
             }
+
+            if code.ops[opidx].is_block_terminal() {
+                blocks[blockidx].push_op::<SPEC>(code.ops[opidx]);
+
+                if opidx + 1 < code.ops.len() && code.ops[opidx + 1] != EvmOp::Jumpdest {
+                    blockidx = blocks.len();
+                    blocks.push(EvmBlock::new(opidx + 1));
+                }
+            } else {
+                blocks[blockidx].push_op::<SPEC>(code.ops[opidx]);
+            }
+
+            target += code.ops[opidx].len();
         }
 
         Self {
-            code,
             len,
+            blocks,
             opidx2target,
-            target2opidx,
+            target2blockidx,
             jumpdests,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Checkpoint {
+    pub high: i64,
+    pub low: i64,
+    pub gas: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct EvmBlock {
+    pub stack_min: i64,
+    pub stack_max: i64,
+    pub checks: Vec<Checkpoint>,
+    pub gas: u64,
+    pub ops: Vec<EvmOp>,
+    pub opidx_base: usize,
+    pub sp: i64,
+}
+
+impl EvmBlock {
+    pub fn new(opidx_base: usize) -> EvmBlock {
+        EvmBlock {
+            stack_min: 0,
+            stack_max: 0,
+            checks: Vec::new(),
+            gas: 0,
+            ops: Vec::new(),
+            opidx_base,
+            sp: 0,
+        }
+    }
+
+    pub fn opidx(&self, blockidx: usize) -> usize {
+        assert!(blockidx < self.ops.len());
+        self.opidx_base + blockidx
+    }
+
+    pub fn push_op<SPEC: Spec>(&mut self, op: EvmOp) {
+        let (pops, pushes) = op.stack();
+
+        self.gas += const_cost::<SPEC>(op);
+
+        self.sp -= pops;
+
+        if self.sp < self.stack_min {
+            self.stack_min = self.sp;
+            self.checks.push(Checkpoint {
+                high: self.stack_max,
+                low: self.stack_min,
+                gas: self.gas,
+            });
+        }
+
+        self.sp += pushes;
+
+        if self.sp > self.stack_max {
+            self.stack_max = self.sp;
+            self.checks.push(Checkpoint {
+                high: self.stack_max,
+                low: self.stack_min,
+                gas: self.gas,
+            });
+        }
+
+        self.ops.push(op);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use revm_primitives::LatestSpec;
+    use std::path::{Path, PathBuf};
+
+    fn workspace_dir() -> PathBuf {
+        let output = std::process::Command::new(env!("CARGO"))
+            .arg("locate-project")
+            .arg("--workspace")
+            .arg("--message-format=plain")
+            .output()
+            .unwrap()
+            .stdout;
+        let cargo_path = Path::new(std::str::from_utf8(&output).unwrap().trim());
+        cargo_path.parent().unwrap().to_path_buf()
+    }
+
+    fn load_bytecode(test_name: &str) -> (usize, EvmCode) {
+        let workspace_dir = workspace_dir();
+
+        let mut path = PathBuf::new();
+        path.push(workspace_dir);
+        path.push("contracts");
+        path.push(format!("{}.bc", test_name));
+
+        let bytecode = std::fs::read_to_string(path).expect("Couldn't open test file");
+        let bytes = hex::decode(bytecode).expect("Invalid hex data");
+
+        let len = bytes.len();
+        let code = EvmCode::new_from_bytes(&bytes, EvmOpParserMode::Strict)
+            .expect("Bytecode parsing failed");
+        (len, code)
+    }
+
+    #[test]
+    fn test_blocks_fibonacci_repetitions() {
+        let (expected_len, bytecode) = load_bytecode("fibonacci_repetitions");
+
+        let EvmBlocks {
+            len,
+            blocks,
+            opidx2target,
+            target2blockidx,
+            jumpdests,
+        } = bytecode.augment().blocks::<LatestSpec>();
+
+        assert_eq!(expected_len, len);
+        for d in jumpdests {
+            assert_eq!(blocks[d].ops[0], EvmOp::Jumpdest);
+        }
+
+        assert_eq!(opidx2target[&0], 0x0);
+        assert_eq!(opidx2target[&5], 0xa);
+        assert_eq!(opidx2target[&16], 0x1b);
+        assert_eq!(opidx2target[&23], 0x23);
+
+        assert_eq!(target2blockidx[&0x03], 1);
+        assert_eq!(target2blockidx[&0x13], 3);
+        assert_eq!(target2blockidx[&0x2a], 5);
+        assert_eq!(target2blockidx[&0x33], 6);
     }
 }

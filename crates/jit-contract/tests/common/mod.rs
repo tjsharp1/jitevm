@@ -1,9 +1,7 @@
 use inkwell::context::Context;
-use jit_contract::{
-    code::{EvmCode, EvmOpParserMode},
-    jit::{
-        contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, TransactionConfig,
-    },
+use jit_contract::code::EvmOpParserMode;
+use jit_contract::jit::{
+    contract::JitContractBuilder, ExecutionResult, JitEvmExecutionContext, TransactionConfig,
 };
 use revm::{InMemoryDB, EVM};
 use revm_primitives::{
@@ -91,18 +89,14 @@ pub fn get_env_args(bundle: DeployImage) -> (Env, InMemoryDB) {
 }
 
 pub fn run_jit_with_code(bundle: DeployImage, calldata: Bytes) -> ExecutionResult {
-    let code = EvmCode::new_from_bytes(&bundle.code, EvmOpParserMode::Strict)
-        .expect("Failed parsing EVM code");
-
     let (_, database) = get_env_args(bundle.clone());
 
     let context = Context::create();
-    let indexed = code.augment().index();
     let contract = JitContractBuilder::with_context("contract", &context)
         .expect("Could not build builder")
+        .debug_asm("evm_equivalence.s")
         .debug_ir("evm_equivalence.ll")
-        .debug_asm("evm_equivalence.asm")
-        .build(LatestSpec, indexed)
+        .build(LatestSpec, &bundle.code, EvmOpParserMode::Strict)
         .expect("Could not JIT contract");
 
     let mut cfg = TransactionConfig::default();
@@ -132,7 +126,9 @@ pub fn run_evm_with_code(deploy: DeployImage, calldata: Bytes) -> ResultAndState
     };
     evm.env.tx.data = calldata;
 
-    evm.transact().expect("REVM execution failed")
+    let result = evm.transact().expect("REVM execution failed");
+
+    result
 }
 
 macro_rules! assert_evm_jit_equivalence {

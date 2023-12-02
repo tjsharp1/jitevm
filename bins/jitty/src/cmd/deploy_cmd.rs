@@ -1,4 +1,4 @@
-use crate::util::{DeployImage, parse_bytes};
+use crate::util::{parse_bytes, DeployImage};
 
 use revm_primitives::Bytes;
 use std::path::PathBuf;
