@@ -107,7 +107,7 @@ pub fn run_jit_with_code(bundle: DeployImage, calldata: Bytes) -> ExecutionResul
         .with_transaction_config(cfg)
         .with_calldata(calldata)
         // snailtracer needs about 10MB
-        .memory_size(12 * 1024 * 1024)
+        .memory_size(16 * 1024 * 1024)
         .build_with_db(&database);
 
     let result = contract

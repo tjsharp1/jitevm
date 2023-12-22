@@ -13,8 +13,9 @@ reth-interfaces.workspace = true
 reth-provider.workspace = true
 revm.workspace = true
 revm-primitives.workspace = true
-sha3.workspace = true
 ruint.workspace = true
+serde.workspace = true
+sha3.workspace = true
 
 
 [features]
@@ -28,7 +29,6 @@ hex.workspace = true
 paste.workspace = true
 rand.workspace = true
 serde_json.workspace = true
-serde.workspace = true
 
 [[bench]]
 name = "evm_bench"

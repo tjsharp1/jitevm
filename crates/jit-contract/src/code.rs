@@ -3,8 +3,10 @@ use alloy_primitives::U256;
 use revm_primitives::Spec;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum EvmOp {
     Stop,
     Add,
@@ -797,7 +799,7 @@ impl EvmCode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvmBlocks {
     pub len: usize,
     pub blocks: Vec<EvmBlock>,
@@ -853,14 +855,14 @@ impl EvmBlocks {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
     pub high: i64,
     pub low: i64,
     pub gas: u64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvmBlock {
     pub stack_min: i64,
     pub stack_max: i64,

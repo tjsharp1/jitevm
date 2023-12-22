@@ -176,7 +176,7 @@ pub struct JitEvmContract<'ctx, SPEC: Spec> {
     //context: &'ctx Context,
     // NOTE: will likely need the module, if linking contract calls via llvm
     //module: Module<'ctx>,
-    //execution_engine: ExecutionEngine<'ctx>,
+    execution_engine: ExecutionEngine<'ctx>,
     spec: SPEC,
     function: JitFunction<'ctx, JitEvmCompiledContract>,
 }
@@ -427,6 +427,6 @@ impl<'ctx> JitContractBuilder<'ctx> {
         // COMPILE
         let function: JitFunction<JitEvmCompiledContract> =
             unsafe { execution_engine.get_function("executecontract")? };
-        Ok(JitEvmContract { function, spec })
+        Ok(JitEvmContract { execution_engine, function, spec })
     }
 }

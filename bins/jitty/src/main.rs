@@ -16,6 +16,10 @@ pub enum SubCommands {
     Deploy(cmd::DeployCmd),
     /// Run a transaction from an initial state.
     ExecuteTx(cmd::ExecuteTxCmd),
+    /// Dump JIT IR.
+    IrInspect(cmd::IrInspectCmd),
+    /// Inspect with REVM.
+    RunInspect(cmd::RunInspectCmd),
 }
 
 fn main() -> eyre::Result<()> {
@@ -25,5 +29,7 @@ fn main() -> eyre::Result<()> {
         SubCommands::Run(cmd) => cmd.run(),
         SubCommands::Deploy(cmd) => cmd.run(),
         SubCommands::ExecuteTx(cmd) => cmd.run(),
+        SubCommands::IrInspect(cmd) => cmd.run(),
+        SubCommands::RunInspect(cmd) => cmd.run(),
     }
 }
