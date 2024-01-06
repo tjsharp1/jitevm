@@ -1,9 +1,9 @@
 use revm::{
     interpreter::{
         instructions::opcode::JUMPDEST,
-        InstructionResult, Interpreter, OpCode,
+        InstructionResult, Interpreter,
     },
-    primitives::{db::Database, HashMap, U256},
+    primitives::{db::Database, HashMap},
     EVMData, Inspector,
 };
 

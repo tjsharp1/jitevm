@@ -2,7 +2,7 @@ use crate::util::{init_db_from_image, parse_bytes, DeployImage};
 use crate::inspectors::jumpdest::JumpdestInspector;
 
 use revm::{EVM, InMemoryDB, inspectors::CustomPrintTracer};
-use revm_primitives::{Bytes, LatestSpec, ResultAndState, TransactTo};
+use revm_primitives::{Bytes, TransactTo};
 use std::{fs::File, io::BufReader, path::PathBuf};
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]

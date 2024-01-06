@@ -12,6 +12,8 @@ eyre = "0.6.8"
 hex.workspace = true
 inkwell.workspace = true
 jit-contract.workspace = true
+libc = "0.2.151"
+mio = "0.8.10"
 reth = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-db.workspace = true
 reth-interfaces.workspace = true
