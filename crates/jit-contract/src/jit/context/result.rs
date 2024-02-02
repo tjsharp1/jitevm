@@ -313,6 +313,8 @@ impl<'ctx> JitContractExecutionResult {
             type_i64.into(), // gas_refunded
             type_ptr.into(), // return ptr
             type_i64.into(), // return data len
+            type_i64.into(), // trace data vec
+            type_i64.into(), // trace data len
         ];
         ctx.struct_type(&fields, false)
     }

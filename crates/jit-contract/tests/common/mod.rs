@@ -114,7 +114,7 @@ pub fn run_jit_with_code(bundle: DeployImage, calldata: Bytes) -> ExecutionResul
         .transact(&mut ctx)
         .expect("JIT contract call failed");
 
-    result
+    result.0
 }
 
 pub fn run_evm_with_code(deploy: DeployImage, calldata: Bytes) -> ResultAndState {

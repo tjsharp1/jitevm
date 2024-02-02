@@ -12,6 +12,7 @@ mod cursor;
 mod error;
 mod ffi;
 pub mod gas;
+pub mod tracing;
 mod types;
 
 mod ops;

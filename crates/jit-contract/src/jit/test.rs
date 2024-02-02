@@ -44,7 +44,7 @@ fn test_jit<SPEC: Spec>(
         .debug_ir("jit_test.ll")
         .debug_asm("jit_test.asm")
         .build(spec, &code, EvmOpParserMode::Strict)?;
-    Ok(contract.transact(ctx).expect("Contract call failed"))
+    Ok(contract.transact(ctx).expect("Contract call failed").0)
 }
 
 fn memory_gas_calc<SPEC: Spec>(offset: u64) -> u64 {

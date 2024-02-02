@@ -7,6 +7,7 @@ use crate::{
         error::JitEvmEngineError,
         gas::init_gas,
         ops,
+        tracing::{TraceData, Tracers, TracingConfig},
         types::JitTypes,
         ExecutionResult,
     },
@@ -22,6 +23,7 @@ use inkwell::OptimizationLevel;
 use revm_primitives::{Bytes, Spec};
 
 pub type JitEvmCompiledContract = unsafe extern "C" fn(usize, usize, u64) -> ();
+pub type JitEvmFetchTracing = unsafe extern "C" fn(usize, usize) -> ();
 
 #[derive(Debug, Copy, Clone)]
 pub struct JitEvmEngineBookkeeping<'ctx> {
@@ -171,21 +173,23 @@ impl<'ctx> JitEvmEngineSimpleBlock<'ctx> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JitEvmContract<'ctx, SPEC: Spec> {
     //context: &'ctx Context,
     // NOTE: will likely need the module, if linking contract calls via llvm
     //module: Module<'ctx>,
+    tracers: Tracers<'ctx>,
     execution_engine: ExecutionEngine<'ctx>,
     spec: SPEC,
     function: JitFunction<'ctx, JitEvmCompiledContract>,
+    fetch_trace_data: Option<JitFunction<'ctx, JitEvmFetchTracing>>,
 }
 
 impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
     pub fn transact(
         &self,
         context: &mut jit::JitEvmExecutionContext<SPEC>,
-    ) -> Result<ExecutionResult, JitEvmEngineError> {
+    ) -> Result<(ExecutionResult, Option<Vec<TraceData>>), JitEvmEngineError> {
         let init_gas = init_gas::<SPEC>(context.calldata());
 
         unsafe {
@@ -198,7 +202,18 @@ impl<'ctx, SPEC: Spec> JitEvmContract<'ctx, SPEC> {
                 init_gas,
             );
 
-            Ok(ExecutionResult::from(result))
+            if self.tracers.is_empty() {
+                Ok((ExecutionResult::from(result), None))
+            } else {
+                let mut data = vec![TraceData::Empty; self.tracers.len()];
+
+                self.fetch_trace_data
+                    .as_ref()
+                    .expect("Tracer retreival fn should exist!")
+                    .call(data.as_mut_ptr() as usize, data.len());
+
+                Ok((ExecutionResult::from(result), Some(data)))
+            }
         }
     }
 }
@@ -208,12 +223,14 @@ pub struct BuilderContext<'ctx> {
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     pub types: JitTypes<'ctx>,
+    pub tracers: Tracers<'ctx>,
 }
 
 pub struct JitContractBuilder<'ctx> {
     pub ctx: BuilderContext<'ctx>,
     pub debug_ir: Option<String>,
     pub debug_asm: Option<String>,
+    pub tracing_options: TracingConfig,
     pub host_functions: jit::HostFunctions<'ctx>,
     pub execution_engine: ExecutionEngine<'ctx>,
 }
@@ -229,11 +246,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
         let types = JitTypes::new(context, &execution_engine);
         let host_functions = jit::HostFunctions::new(types.clone(), &module, &execution_engine);
 
+        let tracers = Tracers::default();
+
         let ctx = BuilderContext {
             context,
             module,
             builder,
             types,
+            tracers,
         };
 
         Ok(Self {
@@ -241,8 +261,14 @@ impl<'ctx> JitContractBuilder<'ctx> {
             execution_engine,
             debug_ir: None,
             debug_asm: None,
+            tracing_options: Default::default(),
             host_functions,
         })
+    }
+
+    pub fn tracing_options(mut self, options: TracingConfig) -> Self {
+        self.tracing_options = options;
+        self
     }
 
     pub fn debug_ir(mut self, filename: &str) -> Self {
@@ -262,16 +288,20 @@ impl<'ctx> JitContractBuilder<'ctx> {
         mode: EvmOpParserMode,
     ) -> Result<JitEvmContract<'ctx, SPEC>, JitEvmEngineError> {
         let JitContractBuilder {
-            ctx,
+            mut ctx,
             execution_engine,
             debug_ir,
             debug_asm,
+            tracing_options,
             host_functions,
         } = self;
 
         let code = EvmCode::new_from_bytes(code, mode)?
             .augment()
             .blocks::<SPEC>();
+
+        // Initialize tracers, setup TLS variables, etc.
+        ctx.tracers = tracing_options.into_tracer(&ctx, &code, &execution_engine)?;
 
         let block_cursor = cursor::BlockCursor::new(&ctx, code)?;
         let mut block_iter = block_cursor.iter();
@@ -282,6 +312,13 @@ impl<'ctx> JitContractBuilder<'ctx> {
             ctx.builder.position_at_end(current_block.block().block);
 
             ops::insert_block_checks(&ctx, current_block)?;
+
+            // Top-of-block stuff for tracers that might be enabled.
+            let val = ctx
+                .types
+                .type_i64
+                .const_int(current_block.index() as u64, false);
+            ctx.tracers.trace_block(&ctx, val)?;
 
             let mut instruction_iter = current_block.instruction_iter();
 
@@ -390,6 +427,30 @@ impl<'ctx> JitContractBuilder<'ctx> {
             }
         }
 
+        if !ctx.tracers.is_empty() {
+            let fetch_trace_fn_type = ctx.types.type_void.fn_type(
+                &[ctx.types.type_ptrint.into(), ctx.types.type_ptrint.into()],
+                false,
+            );
+            let function = ctx
+                .module
+                .add_function("fetch_trace_data", fetch_trace_fn_type, None);
+
+            let block = ctx.context.append_basic_block(function, "fetch_trace");
+            ctx.builder.position_at_end(block);
+
+            let ptr = function
+                .get_nth_param(0)
+                .expect("Has 2 params")
+                .into_int_value();
+            let len = function
+                .get_nth_param(1)
+                .expect("Has 2 params")
+                .into_int_value();
+
+            ctx.tracers.save_trace_data(&ctx, ptr, len)?;
+        };
+
         //// RENDER INSTRUCTIONS
 
         // OUTPUT LLVM
@@ -424,9 +485,25 @@ impl<'ctx> JitContractBuilder<'ctx> {
             machine.write_to_file(&ctx.module, FileType::Assembly, path.as_ref())?;
         }
 
+        let BuilderContext { tracers, .. } = ctx;
+
+        let fetch_trace_data = if tracers.is_empty() {
+            None
+        } else {
+            let f: JitFunction<JitEvmFetchTracing> =
+                unsafe { execution_engine.get_function("fetch_trace_data")? };
+            Some(f)
+        };
+
         // COMPILE
         let function: JitFunction<JitEvmCompiledContract> =
             unsafe { execution_engine.get_function("executecontract")? };
-        Ok(JitEvmContract { execution_engine, function, spec })
+        Ok(JitEvmContract {
+            fetch_trace_data,
+            execution_engine,
+            tracers,
+            function,
+            spec,
+        })
     }
 }

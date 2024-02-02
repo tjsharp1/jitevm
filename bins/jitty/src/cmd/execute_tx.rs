@@ -6,6 +6,7 @@ use jit_contract::{
     jit::{
         contract::JitContractBuilder, ExecutionResult as JITExecutionResult,
         JitEvmExecutionContext, TransactionConfig,
+        tracing::{TraceData, TracingConfig},
     },
 };
 use revm::{EVM, InMemoryDB};
@@ -35,6 +36,9 @@ pub struct ExecuteTxCmd {
     /// Perf stat events to capture, ignored if --use-revm flag is used.
     #[arg(long)]
     stat: Option<String>,
+    /// Capture cumulative block time histogram, ignored if --use-revm flag is used.
+    #[arg(long, conflicts_with = "stat")]
+    times: bool,
 }
 
 fn run_revm(image: &DeployImage, calldata: Bytes) -> eyre::Result<ResultAndState> {
@@ -55,11 +59,14 @@ fn run_revm(image: &DeployImage, calldata: Bytes) -> eyre::Result<ResultAndState
     Ok(result)
 }
 
-fn run_jit(image: &DeployImage, calldata: Bytes, context: &Context, capture: &mut EventCapture) -> eyre::Result<JITExecutionResult> {
+fn run_jit(image: &DeployImage, calldata: Bytes, context: &Context, capture: &mut EventCapture, trace_times: bool) -> eyre::Result<(JITExecutionResult, Option<Vec<TraceData>>)> {
     let database = init_db_from_image(image)?;
 
     let mut cfg = TransactionConfig::default();
     cfg.transact_to = image.address;
+
+    let mut trace_config = TracingConfig::new();
+    trace_config.trace_times(trace_times);
 
     let mut ctx = JitEvmExecutionContext::builder(LatestSpec)
         // snailtracer needs moar mem!
@@ -70,8 +77,9 @@ fn run_jit(image: &DeployImage, calldata: Bytes, context: &Context, capture: &mu
 
     let contract = JitContractBuilder::with_context("jit-instructions", &context)
         .expect("Could not create builder")
-        //.debug_ir("tx.ll")
-        //.debug_asm("tx.asm")
+        .tracing_options(trace_config)
+        .debug_ir("stacksave.ll")
+        .debug_asm("stacksave.s")
         .build(LatestSpec, &image.code, EvmOpParserMode::Strict)
         .expect("Could not build JIT contract");
 
@@ -157,7 +165,7 @@ impl ExecuteTxCmd {
         } else {
             let context = Context::create();
             let mut capture = EventCapture::from_args(&self)?;
-            let jit_result = run_jit(&image, self.calldata.clone(), &context, &mut capture)?;
+            let jit_result = run_jit(&image, self.calldata.clone(), &context, &mut capture, self.times)?;
 
             println!("JIT {:?}", jit_result);
         }

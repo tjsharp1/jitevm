@@ -1,10 +1,9 @@
 use crate::jit::gas::const_cost;
 use alloy_primitives::U256;
 use revm_primitives::Spec;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum EvmOp {

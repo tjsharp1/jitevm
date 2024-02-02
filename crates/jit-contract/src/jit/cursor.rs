@@ -370,10 +370,7 @@ impl<'ctx> BlockCursor<'ctx> {
             "stop",
             "-stop",
         )?);
-        JitContractExecutionResult::build_exit_stop(
-            ctx,
-            &blocks[blocks_len].book(),
-        )?;
+        JitContractExecutionResult::build_exit_stop(ctx, &blocks[blocks_len].book())?;
 
         Ok(BlockCursor { code, blocks })
     }
