@@ -13,6 +13,7 @@ pub enum Emit {
     Blocks,
     LlvmIr,
     Asm,
+    Obj,
 }
 
 /// Dump EVM blocks
@@ -43,6 +44,15 @@ fn dump_jit_asm(image: &DeployImage, ir_filename: &str, context: &Context) -> ey
     JitContractBuilder::with_context("jit-instructions", &context)
         .expect("Could not create builder")
         .debug_asm(ir_filename)
+        .build(LatestSpec, &image.code, EvmOpParserMode::Strict)
+        .expect("Could not dump ASM.");
+    Ok(())
+}
+
+fn dump_jit_obj(image: &DeployImage, ir_filename: &str, context: &Context) -> eyre::Result<()> {
+    JitContractBuilder::with_context("jit-instructions", &context)
+        .expect("Could not create builder")
+        .debug_obj(ir_filename)
         .build(LatestSpec, &image.code, EvmOpParserMode::Strict)
         .expect("Could not dump ASM.");
     Ok(())
@@ -82,6 +92,11 @@ impl IrInspectCmd {
                 let context = Context::create();
 
                 dump_jit_asm(&image, output_path.to_str().unwrap(), &context)?;
+            }
+            Emit::Obj => {
+                let context = Context::create();
+
+                dump_jit_obj(&image, output_path.to_str().unwrap(), &context)?;
             }
         }
 

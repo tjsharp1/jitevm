@@ -230,6 +230,7 @@ pub struct JitContractBuilder<'ctx> {
     pub ctx: BuilderContext<'ctx>,
     pub debug_ir: Option<String>,
     pub debug_asm: Option<String>,
+    pub debug_obj: Option<String>,
     pub tracing_options: TracingConfig,
     pub host_functions: jit::HostFunctions<'ctx>,
     pub execution_engine: ExecutionEngine<'ctx>,
@@ -261,6 +262,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             execution_engine,
             debug_ir: None,
             debug_asm: None,
+            debug_obj: None,
             tracing_options: Default::default(),
             host_functions,
         })
@@ -281,6 +283,11 @@ impl<'ctx> JitContractBuilder<'ctx> {
         self
     }
 
+    pub fn debug_obj(mut self, filename: &str) -> Self {
+        self.debug_obj = Some(filename.into());
+        self
+    }
+
     pub fn build<SPEC: Spec>(
         self,
         spec: SPEC,
@@ -292,6 +299,7 @@ impl<'ctx> JitContractBuilder<'ctx> {
             execution_engine,
             debug_ir,
             debug_asm,
+            debug_obj,
             tracing_options,
             host_functions,
         } = self;
@@ -483,6 +491,32 @@ impl<'ctx> JitContractBuilder<'ctx> {
             // create a module and do JIT stuff
 
             machine.write_to_file(&ctx.module, FileType::Assembly, path.as_ref())?;
+        }
+
+        if let Some(path) = debug_obj {
+            // https://github.com/TheDan64/inkwell/issues/184
+            // https://thedan64.github.io/inkwell/inkwell/targets/struct.TargetMachine.html#method.write_to_file
+            use inkwell::targets::{CodeModel, FileType, RelocMode, TargetMachine};
+
+            let triple = TargetMachine::get_default_triple();
+            let cpu = TargetMachine::get_host_cpu_name().to_string();
+            let features = TargetMachine::get_host_cpu_features().to_string();
+
+            let target = Target::from_triple(&triple).unwrap();
+            let machine = target
+                .create_target_machine(
+                    &triple,
+                    &cpu,
+                    &features,
+                    OptimizationLevel::Aggressive,
+                    RelocMode::Default,
+                    CodeModel::Default,
+                )
+                .unwrap();
+
+            // create a module and do JIT stuff
+
+            machine.write_to_file(&ctx.module, FileType::Object, path.as_ref())?;
         }
 
         let BuilderContext { tracers, .. } = ctx;
